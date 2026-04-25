@@ -6,9 +6,91 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from ai_system.app.agent_output import build_structured_output, risk_severity
 from ai_system.app.analysis_utils import ml_score_transactions
 from ai_system.app.llm import chat, is_rate_limit_error
 from ai_system.app.ml import get_risk_engine
+
+
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _risk_contract(audience: str = "analyst") -> str:
+    return (
+        "Keep the response concise and action-oriented. Use these sections only:\n"
+        "Summary: 1-2 sentences.\n"
+        "Severity: low, medium, high, critical, or unknown.\n"
+        "Confidence: low, medium, or high.\n"
+        "Key factors: up to 3 bullets.\n"
+        "Recommended actions: up to 3 bullets.\n"
+        "Follow-up: up to 2 bullets.\n"
+        f"Audience: {audience}."
+    )
+
+
+def _summary_from_text(text: str, fallback: str) -> str:
+    clean = " ".join((text or fallback).split())
+    if len(clean) <= 240:
+        return clean
+    return clean[:237].rstrip() + "..."
+
+
+def _severity_from_scores(scores: list[dict[str, Any]] | None, text: str = "") -> str:
+    max_score = None
+    for item in scores or []:
+        value = item.get("final_score", item.get("risk_score"))
+        if isinstance(value, (int, float)):
+            max_score = value if max_score is None else max(max_score, value)
+    return (
+        risk_severity(max_score, text)
+        if max_score is not None
+        else risk_severity(text=text)
+    )
+
+
+def _actions_for_severity(severity: str) -> list[str]:
+    if severity == "critical":
+        return [
+            "Hold or block the highest-risk activity pending senior review.",
+            "Validate customer intent, counterparties, and related alerts.",
+            "Open or update an escalation case with supporting evidence.",
+        ]
+    if severity == "high":
+        return [
+            "Queue for analyst review before closure.",
+            "Compare flagged activity with recent customer and portfolio behavior.",
+            "Escalate if similar indicators recur.",
+        ]
+    if severity == "medium":
+        return [
+            "Document the reviewed risk factors.",
+            "Monitor for repeated transaction or allocation signals.",
+        ]
+    return ["Continue routine monitoring and retain the analysis rationale."]
+
+
+def _score_factors(scores: list[dict[str, Any]] | None) -> list[str]:
+    factors: list[str] = []
+    labels: dict[str, int] = {}
+    flags: dict[str, int] = {}
+    for item in scores or []:
+        label = str(item.get("risk_label") or "unknown")
+        labels[label] = labels.get(label, 0) + 1
+        for flag in item.get("flags", []) or []:
+            flags[str(flag)] = flags.get(str(flag), 0) + 1
+    if labels:
+        factors.append(
+            "Risk labels: "
+            + ", ".join(f"{label}={count}" for label, count in sorted(labels.items()))
+        )
+    if flags:
+        top_flags = sorted(flags.items(), key=lambda item: (-item[1], item[0]))[:3]
+        factors.append(
+            "Top flags: "
+            + ", ".join(f"{flag} ({count})" for flag, count in top_flags)
+        )
+    return factors
 
 
 def _score_transaction_risk(
@@ -89,10 +171,9 @@ Automated Scoring:
   ML Risk Label:      {hybrid_result["ml_details"].get("ml_risk_label", "N/A")}
   ML Fraud Flag:      {hybrid_result["ml_details"].get("ml_fraud_flag", "N/A")}
 
-Provide:
-1. Plain-language risk explanation (2-3 sentences)
-2. Recommended action: APPROVE / HOLD_FOR_REVIEW / ESCALATE / BLOCK
-3. Key factors driving the score"""
+{_risk_contract("analyst")}
+
+Recommended action must be one of: APPROVE, HOLD_FOR_REVIEW, ESCALATE, BLOCK."""
     return chat(prompt)
 
 
@@ -105,15 +186,9 @@ Transaction:
 Customer Profile:
 {json.dumps(customer_profile, indent=2)}
 
-Evaluate:
-1. Deviation from customer norm
-2. Fraud indicators
-3. AML/KYC concerns
-4. Regulatory red flags
-5. Risk score (1-100)
-6. Action recommendations
+{_risk_contract("analyst")}
 
-Return risk score and required actions."""
+Estimate risk score from 1-100 and include the recommended action."""
     result = chat(prompt)
     return {
         "agent": "RiskAssessment",
@@ -215,23 +290,31 @@ Portfolio:
 Market Conditions:
 {json.dumps(market_conditions, indent=2)}
 
-Assess:
-1. Market risk (Beta, Volatility, correlation)
-2. Concentration risk (sector, asset class, single stock)
-3. Liquidity risk
-4. Counterparty risk
-5. Currency risk (if applicable)
-6. Interest rate risk
-7. Overall portfolio score (0-100)
+{_risk_contract("analyst")}
 
-Return detailed risk breakdown with heat map and recommendations."""
+Focus on concentration, liquidity, market sensitivity, and practical mitigations."""
     result = chat(prompt)
+    risk_analysis = result or "Risk assessment unavailable."
+    severity = risk_severity(text=risk_analysis)
     return {
         "agent": "RiskAssessment",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "assessment_type": "portfolio",
-        "risk_analysis": result or "Risk assessment unavailable.",
+        "risk_analysis": risk_analysis,
         "complete": True,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(risk_analysis, "Risk assessment unavailable."),
+            severity=severity,
+            confidence="medium",
+            key_factors=[
+                f"Assets reviewed: {len(portfolio_data.get('assets', []))}",
+                f"Total value: {portfolio_data.get('total_value', 'unknown')}",
+                f"Market context supplied: {'yes' if market_conditions else 'no'}",
+            ],
+            recommended_actions=_actions_for_severity(severity),
+            follow_up=["Reassess after major allocation or market-condition changes."],
+            raw_text=risk_analysis,
+        ),
     }
 
 
@@ -276,19 +359,29 @@ def detect_fraud_risk(
         f"Transaction History:\n{json.dumps(transaction_history[:10], indent=2)}\n\n"
         f"Portfolio Data:\n{json.dumps(portfolio_data, indent=2)}"
         f"{ml_section}\n\n"
-        "Identify:\n"
-        "1. Unusual transaction patterns\n"
-        "2. Potential fraud indicators\n"
-        "3. Risk level (low/medium/high)\n"
-        "4. Specific alerts needed\n"
-        "5. Recommended actions"
+        f"{_risk_contract('analyst')}\n\n"
+        "Identify unusual transaction patterns, fraud indicators, specific alerts, "
+        "and recommended actions."
     )
     response = chat(prompt)
+    assessment = response or "Fraud analysis unavailable."
+    severity = _severity_from_scores(ml_pre_scores, assessment)
+    key_factors = _score_factors(ml_pre_scores)
+    key_factors.append(f"Transactions reviewed: {len(transaction_history[:10])}")
     return {
         "agent": "RiskDetector",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "alert_type": "fraud_risk",
-        "assessment": response or "Fraud analysis unavailable.",
+        "assessment": assessment,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(assessment, "Fraud analysis unavailable."),
+            severity=severity,
+            confidence="high" if ml_pre_scores else "medium",
+            key_factors=key_factors,
+            recommended_actions=_actions_for_severity(severity),
+            follow_up=["Compare future activity against the same fraud indicators."],
+            raw_text=assessment,
+        ),
     }
 
 
@@ -298,19 +391,31 @@ def assess_market_risk(portfolio_data: dict[str, Any], market_conditions: dict[s
         "market conditions:\n\n"
         f"Portfolio:\n{json.dumps(portfolio_data, indent=2)}\n\n"
         f"Market Conditions:\n{json.dumps(market_conditions, indent=2)}\n\n"
-        "Provide:\n"
-        "1. Market risk exposure assessment\n"
-        "2. Sector-specific risks\n"
-        "3. Systemic risk analysis\n"
-        "4. Hedging recommendations\n"
-        "5. Protective measures"
+        f"{_risk_contract('analyst')}\n\n"
+        "Assess market exposure, sector-specific risks, systemic risk, and protective measures."
     )
     response = chat(prompt)
+    assessment = response or "Market risk assessment unavailable."
+    severity = risk_severity(text=assessment)
     return {
         "agent": "RiskDetector",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "alert_type": "market_risk",
-        "assessment": response or "Market risk assessment unavailable.",
+        "assessment": assessment,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(
+                assessment, "Market risk assessment unavailable."
+            ),
+            severity=severity,
+            confidence="medium",
+            key_factors=[
+                f"Assets reviewed: {len(portfolio_data.get('assets', []))}",
+                f"Market fields supplied: {len(market_conditions)}",
+            ],
+            recommended_actions=_actions_for_severity(severity),
+            follow_up=["Refresh market assumptions before making trading decisions."],
+            raw_text=assessment,
+        ),
     }
 
 
@@ -406,12 +511,14 @@ def quick_portfolio_recommendation(
 
     try:
         prompt = (
-            "Quick risk assessment (2-3 sentences):\n"
+            "Quick risk assessment for an analyst:\n"
             f"{portfolio_summary}\n"
-            "Key risks? Recommendation?\n"
-            f"{ml_summary}"
+            f"{ml_summary}\n\n"
+            f"{_risk_contract('analyst')}\n"
+            "Be direct about whether the portfolio needs routine monitoring, review, or escalation."
         )
         recommendation = chat(prompt)
+        severity = risk_severity(text=f"{recommendation}\n{ml_summary}")
         crew_output = (
             "## ⚡ Quick Recommendation\n\n"
             f"**Portfolio:** {portfolio_summary}\n\n"
@@ -425,9 +532,24 @@ def quick_portfolio_recommendation(
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "portfolio_id": portfolio_data.get("id"),
             "crew_output": crew_output,
+            "recommendation": recommendation,
             "agents_used": 1,
             "recommendation_type": "quick",
             "rate_limited": False,
+            "structured_output": build_structured_output(
+                summary=_summary_from_text(
+                    recommendation, "Quick recommendation unavailable."
+                ),
+                severity=severity,
+                confidence="medium",
+                key_factors=[
+                    portfolio_summary,
+                    "ML pre-screening supplied: " + ("yes" if ml_summary else "no"),
+                ],
+                recommended_actions=_actions_for_severity(severity),
+                follow_up=["Run full analysis before making high-impact decisions."],
+                raw_text=crew_output,
+            ),
         }
     except Exception as exc:
         if is_rate_limit_error(exc):
@@ -444,6 +566,15 @@ def quick_portfolio_recommendation(
                 "agents_used": 0,
                 "recommendation_type": "quick",
                 "rate_limited": True,
+                "structured_output": build_structured_output(
+                    summary="Quick recommendation was rate limited; ML pre-screening remains available.",
+                    severity=risk_severity(text=ml_summary),
+                    confidence="low",
+                    key_factors=["LLM recommendation unavailable due to rate limiting."],
+                    recommended_actions=["Retry after the model service recovers."],
+                    follow_up=["Use full analysis once quota is available."],
+                    raw_text=fallback,
+                ),
             }
 
         return {
@@ -453,6 +584,15 @@ def quick_portfolio_recommendation(
             "agents_used": 0,
             "recommendation_type": "quick",
             "error": str(exc),
+            "structured_output": build_structured_output(
+                summary="Quick recommendation failed before an analyst narrative could be generated.",
+                severity="unknown",
+                confidence="low",
+                key_factors=[str(exc)[:200]],
+                recommended_actions=["Retry the request or run deterministic transaction scoring."],
+                follow_up=["Check model configuration if the failure repeats."],
+                raw_text=str(exc),
+            ),
         }
 
 
@@ -485,12 +625,22 @@ def invoke(portfolio: dict, transactions: list[dict], mode: str = "quick") -> di
             "Quick risk screen did not detect any strong operational risk signal."
         )
 
+    severity = _severity_from_scores(scored)
     return {
         "agent": "risk",
         "mode": mode,
         "summary": " ".join(findings),
         "findings": findings,
         "scored_transactions": scored,
+        "structured_output": build_structured_output(
+            summary=" ".join(findings),
+            severity=severity,
+            confidence="high" if available_scores else "medium",
+            key_factors=_score_factors(scored) + findings,
+            recommended_actions=_actions_for_severity(severity),
+            follow_up=["Review scored transactions if new alerts or cases appear."],
+            raw_text=" ".join(findings),
+        ),
     }
 
 
