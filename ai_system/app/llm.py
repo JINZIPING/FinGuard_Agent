@@ -1,9 +1,11 @@
-"""OpenAI adapter with legacy-style retry and error semantics."""
+"""OpenAI adapter with deterministic mock support for demos and tests."""
 
 from __future__ import annotations
 
 import os
 import time
+
+from ai_system.app.mock_responses import generate_mock_response
 
 try:
     from openai import OpenAI
@@ -55,7 +57,19 @@ def _format_chat_error(error: Exception) -> str:
     )
 
 
+def response_mode() -> str:
+    mode = str(os.getenv("AI_RESPONSE_MODE", "live")).strip().lower()
+    return mode if mode in {"live", "mock"} else "live"
+
+
+def is_mock_mode() -> bool:
+    return response_mode() == "mock"
+
+
 def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -> str:
+    if is_mock_mode():
+        return generate_mock_response(message, system_prompt)
+
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError(

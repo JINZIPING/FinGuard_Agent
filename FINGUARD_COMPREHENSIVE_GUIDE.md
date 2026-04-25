@@ -1,224 +1,144 @@
 # FinGuard Comprehensive Guide
 
-Last updated: 2026-04-25
+Last updated: 2026-04-26
 
-## 1. What FinGuard Is
+## 1. Product Positioning
 
-FinGuard is a fraud and portfolio risk investigation tool. It combines the React frontend, a FastAPI backend, and a LangGraph-based AI system with internal agents.
+FinGuard is an explainable investigation workspace for financial fraud and portfolio risk review. The system is optimized for:
 
-The product is designed for:
+- visible multi-agent orchestration
+- traceable analysis outputs
+- human-reviewed case workflows
+- assessment-ready architecture, security, and operational artifacts
 
-- portfolio and transaction review
-- fraud and risk analysis
-- market sentiment checks
-- case workflow
-- audit and SAR export
-- explainable multi-agent AI output
+It is not designed to take fully autonomous enforcement actions.
 
-## 2. Architecture
+## 2. Service Architecture
 
 ```text
 React Frontend
   -> FastAPI Backend
       -> SQLite persistence
-      -> AI System over HTTP
-          -> LangGraph workflow
-          -> Internal agents
-          -> OpenAI model adapter
-          -> ML/rules risk adapter
+      -> Audit / SAR / search / cases
+      -> AI bridge
+          -> FastAPI AI System
+              -> LangGraph workflow
+              -> 9 internal agents
+              -> OpenAI live mode or deterministic mock mode
+              -> ML/rules transaction scoring
 ```
 
-Service responsibilities:
+## 3. Core User Journeys
 
-- `frontend`: primary analyst UI, delivered as a standalone React app.
-- `backend`: stable API, persistence, auth, cases, audit, SAR, and AI proxying.
-- `ai_system`: model calls, LangGraph orchestration, agent strategy, and trace metadata.
+### Journey A: Portfolio Analysis
 
-## 3. Main Workflow
+1. Frontend loads portfolios from backend
+2. User selects a portfolio
+3. Backend gathers assets and transactions
+4. Backend calls `ai_system`
+5. LangGraph runs the portfolio review route
+6. Backend returns `crew_output` and `analysis_trace`
 
-1. User opens the frontend.
-2. User selects a portfolio in AI Analysis.
-3. Frontend calls backend portfolio endpoints.
-4. Frontend calls `POST /api/portfolios/{id}/analyze`.
-5. Backend builds a normalized payload and calls `ai_system`.
-6. AI system runs LangGraph and internal agents.
-7. AI system returns final output plus `analysis_trace`.
-8. Frontend renders the real trace and final analysis.
+### Journey B: Suspicious Activity Review
+
+1. A suspicious transaction is recorded
+2. Transaction risk scoring returns a high or critical score
+3. Backend auto-creates:
+   - alert
+   - case
+   - case event
+   - persisted analysis
+4. Analyst reviews the case and customer 360 context
+5. Analyst exports SAR JSON or PDF if needed
 
 ## 4. Internal Agents
-
-Current agent list:
 
 - Alert Intake
 - Customer Context
 - Risk Assessment
 - Risk Detection
 - Explanation
-- Escalation Summary
+- Escalation Case Summary
 - Portfolio Analysis
 - Market Intelligence
 - Compliance
 
-The agents are code-level modules inside `ai_system`, not separate services.
+These are code modules inside `ai_system`, not separate network services.
 
-## 5. LangGraph Flow
+## 5. Explainability and Traceability
 
-Current portfolio review graph:
+- portfolio analysis returns `analysis_trace`
+- case workflows record `case_events`
+- audit-sensitive actions write hash-chained audit log entries
+- SAR exports include narrative, timeline, and saved AI analysis
 
-```text
-ingest_request
-  -> quick: run_quick_recommendation
-  -> full: run_full_crew_one
-       -> run_full_crew_two
-       -> run_full_crew_three
-       -> compile_full_response
-```
+## 6. Demo Reliability Features
 
-Returned trace events include:
+### Deterministic Mock Mode
 
-- `sequence`
-- `type`
-- `node`
-- `crew`
-- `name`
-- `status`
-- `duration_ms`
-- `body`
-
-The trace is real after completion. It is not yet streamed live while the request is running.
-
-## 6. Running Locally
-
-Create `ai_system/.env`:
+Use:
 
 ```env
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=gpt-5.4-mini
-OPENAI_REASONING_EFFORT=medium
+AI_RESPONSE_MODE=mock
 ```
 
+This removes the dependency on live model access and makes tests and demos reproducible.
+
+### Seeded Demo Dataset
+
 Run:
+
+```bash
+python scripts/seed_demo_data.py --reset
+```
+
+This creates:
+
+- seeded demo users
+- a demo portfolio
+- demo assets
+- normal and suspicious transactions
+- an auto-opened case ready for the case/SAR storyline
+
+## 7. Running Locally
+
+1. Copy `ai_system/.env.example` to `ai_system/.env`
+2. Optional: switch to mock mode for deterministic output
+3. Seed the demo data
+4. Run:
 
 ```bash
 docker compose up --build
 ```
 
-Open:
+## 8. CI / Operational Workflow
 
-```text
-http://localhost:13000
-```
+`/.github/workflows/ci.yml` now covers:
 
-Service URLs:
+- frontend build
+- backend and AI tests
+- Docker smoke tests with seeded data and mock mode
 
-- Frontend: `http://localhost:13000`
-- Backend: `http://localhost:15050`
-- AI system: `http://localhost:18000`
+Deployment workflows remain in:
 
-## 7. Frontend Configuration
+- `.github/workflows/deploy-backend.yml`
+- `.github/workflows/deploy-ai-system.yml`
 
-The React frontend injects the backend base URL at build time through:
+## 9. Assessment Documentation
 
-```text
-REACT_APP_API_BASE_URL=http://localhost:15050
-```
+Primary write-up files:
 
-For local `npm start`, the frontend falls back to `/api` and uses the React dev proxy.
+- `docs/SYSTEM_ARCHITECTURE.md`
+- `docs/AGENT_DESIGN.md`
+- `docs/RESPONSIBLE_AI_REPORT.md`
+- `docs/AI_SECURITY_RISK_REGISTER.md`
+- `docs/MLSECOPS_LLMSecOps_PIPELINE.md`
+- `docs/TESTING_AND_DEMO_RUNBOOK.md`
+- `docs/REPORT_SOURCE_PACK.md`
 
-## 8. Backend Configuration
+## 10. Current Boundaries
 
-Important environment variables:
-
-```text
-AI_SYSTEM_URL=http://ai_system:8000
-AI_SYSTEM_TIMEOUT_SECONDS=90
-CORS_ORIGINS=http://localhost:13000,http://localhost:3000
-AUTH_ENFORCED=false
-JWT_SECRET=<set-in-production>
-BACKEND_DB_PATH=./data/backend.db
-```
-
-Production notes:
-
-- Set `AUTH_ENFORCED=true`.
-- Set a strong `JWT_SECRET`.
-- Configure `CORS_ORIGINS` to the deployed frontend origin.
-- Use durable storage or a managed database for cloud persistence.
-
-## 9. AI System Configuration
-
-Important environment variables:
-
-```text
-OPENAI_API_KEY=<required>
-OPENAI_MODEL=gpt-5.4-mini
-OPENAI_REASONING_EFFORT=medium
-```
-
-If trained ML model files are unavailable, risk scoring falls back to rule-based behavior where supported.
-
-## 10. Key API Groups
-
-See `api.md` for the concise contract.
-
-Main frontend-used endpoints:
-
-- `GET /api/portfolios`
-- `GET /api/portfolios/{id}`
-- `GET /api/portfolios/{id}/assets`
-- `GET /api/portfolios/{id}/transactions`
-- `POST /api/portfolios/{id}/analyze`
-- `GET /api/symbols`
-- `GET /api/sentiment?symbols=AAPL,MSFT`
-
-Other backend capabilities:
-
-- auth
-- alerts
-- transaction risk scoring
-- recommendations
-- cases
-- audit verification
-- SAR JSON/PDF export
-- search
-
-## 11. Deployment
-
-Current GitHub Actions workflow:
-
-```text
-.github/workflows/deploy-backend.yml
-```
-
-It:
-
-- triggers on push to `main`
-- builds `backend/Dockerfile`
-- uses `linux/amd64`
-- tags with `${{ github.sha }}`
-- pushes to `finguardacr.azurecr.io/finguard-backend`
-- updates Azure Container App `finguard-backend`
-
-Required GitHub secrets:
-
-- `AZURE_CREDENTIALS`
-- `AZURE_RESOURCE_GROUP`
-
-Current deployment gap:
-
-- frontend and `ai_system` do not yet have matching CI/CD workflows.
-
-## 12. Current Limitations
-
-- Some frontend flows currently wait for direct JSON responses because backend SSE endpoints are not implemented yet.
-- Agent trace is returned after completion, not streamed live.
-- SQLite is demo-friendly but needs a durable production plan.
-- Backend-only CI/CD is not enough for full cloud deployment.
-
-## 13. Recommended Next Steps
-
-1. Add SSE streaming endpoints so the frontend can show live thinking instead of final-only responses.
-2. Complete a first-class auth flow for cases instead of manual bearer token pasting.
-3. Break the embedded frontend shell into native React components over time.
-4. Add CI/CD for frontend and `ai_system`.
-5. Move cloud persistence to durable storage.
+- live SSE trace streaming is still deferred
+- SQLite remains a demo-friendly persistence layer
+- fairness evaluation is documented, but not yet implemented as a full benchmark pipeline
+- production edge security controls are outside this repo’s current scope

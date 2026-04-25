@@ -11,6 +11,7 @@ from ai_system.app.agents import (
     portfolio_analysis_agent as portfolio,
     risk_assessment_agent as risk,
 )
+from ai_system.app.llm import response_mode
 from ai_system.app.orchestrator import portfolio_review
 from ai_system.app.schemas import (
     MarketRecommendationRequest,
@@ -26,7 +27,7 @@ app = FastAPI(title="FinGuard AI System")
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "healthy"}
+    return {"status": "healthy", "response_mode": response_mode()}
 
 
 @app.post("/agents/risk/invoke")

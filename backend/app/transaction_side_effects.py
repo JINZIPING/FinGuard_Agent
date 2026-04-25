@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.analysis_store import persist_analysis, sync_analysis_record, utc_now
@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover - optional runtime dependency
 logger = logging.getLogger(__name__)
 
 CASE_OPEN_THRESHOLD = 55.0
+SLA_HOURS = {"critical": 4, "high": 12, "medium": 48, "low": 120}
 
 
 def _risk_label(score: float) -> str:
@@ -38,6 +39,10 @@ def _priority_from_label(label: str) -> str:
         "medium": "medium",
         "low": "low",
     }.get(label, "medium")
+
+
+def _sla_due(priority: str, opened_at: datetime) -> str:
+    return (opened_at + timedelta(hours=SLA_HOURS.get(priority, 48))).isoformat()
 
 
 def _risk_flags(risk_result: dict[str, Any] | None) -> list[str]:
@@ -146,6 +151,7 @@ def create_transaction_with_side_effects(
     *,
     risk_result: dict[str, Any] | None = None,
     now: str | None = None,
+    tenant_id: int | None = None,
 ) -> dict[str, Any]:
     created_at = now or utc_now()
     symbol = str(payload.get("symbol", "")).upper()
@@ -226,6 +232,7 @@ def create_transaction_with_side_effects(
                 flags = _risk_flags(persisted_risk)
                 label = str(persisted_risk.get("risk_label") or _risk_label(score))
                 priority = _priority_from_label(label)
+                opened_at = datetime.fromisoformat(created_at)
                 alert_message = (
                     f"ML Risk Alert: Transaction #{transaction_id} scored "
                     f"{score:.1f}/100 ({label}). Flags: {', '.join(flags) or 'none'}"
@@ -254,16 +261,18 @@ def create_transaction_with_side_effects(
                 case_id = execute(
                     """
                     INSERT INTO cases (
-                        portfolio_id, transaction_id, alert_id, title, summary, risk_score,
-                        risk_label, priority, symbol, amount, flags, status, source,
-                        metadata, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        tenant_id, portfolio_id, transaction_id, alert_id, title, subject_user,
+                        summary, risk_score, risk_label, priority, symbol, amount, flags, status,
+                        source, metadata, state, opened_at, sla_due_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
+                        tenant_id,
                         portfolio["id"],
                         transaction_id,
                         alert_id,
                         f"Review {symbol} {transaction_type} - {label}",
+                        portfolio.get("user_id"),
                         _case_summary(symbol, transaction_type, persisted_risk),
                         score,
                         label,
@@ -282,6 +291,9 @@ def create_transaction_with_side_effects(
                             ensure_ascii=True,
                             sort_keys=True,
                         ),
+                        "new",
+                        opened_at.isoformat(),
+                        _sla_due(priority, opened_at),
                         created_at,
                         created_at,
                     ),
@@ -289,8 +301,9 @@ def create_transaction_with_side_effects(
                 )
                 execute(
                     """
-                    INSERT INTO case_events (case_id, event_type, body, metadata, created_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO case_events (
+                        case_id, event_type, body, metadata, timestamp, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
                         case_id,
@@ -306,6 +319,7 @@ def create_transaction_with_side_effects(
                             ensure_ascii=True,
                             sort_keys=True,
                         ),
+                        created_at,
                         created_at,
                     ),
                     conn=conn,

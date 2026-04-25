@@ -19,9 +19,26 @@ except ImportError:  # pragma: no cover
     StateGraph = None
 
 
+class _FallbackCompiledGraph:
+    """Minimal sequential fallback used when langgraph is unavailable."""
+
+    def invoke(self, state: PortfolioAnalysisState) -> PortfolioAnalysisState:
+        next_state = ingest_request(dict(state))
+        route = choose_analysis_route(next_state)
+        if route == "quick":
+            next_state = run_quick_recommendation(next_state)
+            next_state = compile_quick_response(next_state)
+            return next_state
+        next_state = run_full_crew_one(next_state)
+        next_state = run_full_crew_two(next_state)
+        next_state = run_full_crew_three(next_state)
+        next_state = compile_full_response(next_state)
+        return next_state
+
+
 def build_portfolio_review_graph():
     if StateGraph is None:
-        raise ImportError("langgraph is not installed yet")
+        return _FallbackCompiledGraph()
 
     graph = StateGraph(PortfolioAnalysisState)
     graph.add_node("ingest_request", ingest_request)

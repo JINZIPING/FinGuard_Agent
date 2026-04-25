@@ -1,8 +1,8 @@
 # FinGuard API Contract
 
-Last updated: 2026-04-25
+Last updated: 2026-04-26
 
-This is the concise frontend/backend contract. Keep it updated when route paths, payloads, auth, or response envelopes change.
+This document is the stable frontend/backend contract. Keep response envelopes backward-compatible and prefer additive changes over renames.
 
 ## Base URLs
 
@@ -10,34 +10,33 @@ This is the concise frontend/backend contract. Keep it updated when route paths,
 Local backend dev:      http://localhost:5000
 Docker backend:         http://localhost:15050
 Docker frontend:        http://localhost:13000
-Cloud backend:          https://<finguard-backend-url>
+Docker ai_system:       http://localhost:18000
 ```
 
-Frontend builds can inject the backend base URL through:
+Frontend builds inject the backend origin through:
 
 ```text
 REACT_APP_API_BASE_URL
 ```
 
-Local React development can also fall back to same-origin `/api` via the dev proxy.
+## Operational Modes
 
-Backend CORS must include the deployed frontend origin:
+### Backend auth
 
-```text
-CORS_ORIGINS=https://<frontend-url>
-```
+- `AUTH_ENFORCED=false`
+  - default demo mode
+  - case, audit, and SAR flows use the default system identity
+- `AUTH_ENFORCED=true`
+  - bearer token required for auth-protected routes
+  - set a strong `JWT_SECRET`
 
-## Conventions
+### AI response mode
 
-- JSON request/response bodies unless noted otherwise.
-- Send `Content-Type: application/json`.
-- Auth header: `Authorization: Bearer <token>`.
-- Error shape may be `{ "error": "..." }` or `{ "detail": "..." }`.
-
-Demo mode:
-
-- `AUTH_ENFORCED=false` allows default system identity.
-- Production should set `AUTH_ENFORCED=true` and a strong `JWT_SECRET`.
+- `AI_RESPONSE_MODE=live`
+  - uses OpenAI
+- `AI_RESPONSE_MODE=mock`
+  - deterministic offline/demo mode
+  - recommended for CI and classroom demos
 
 ## Frontend-Used Endpoints
 
@@ -51,7 +50,7 @@ GET /api/health
 Response:
 
 ```json
-{ "status": "healthy", "timestamp": "2026-04-25T00:00:00" }
+{ "status": "healthy", "timestamp": "2026-04-26T00:00:00" }
 ```
 
 ### Portfolios
@@ -71,12 +70,12 @@ POST /api/portfolios/{portfolio_id}/analyze
   "portfolios": [
     {
       "id": 1,
-      "user_id": "user_123",
-      "name": "Demo Portfolio",
-      "total_value": 10000,
-      "cash_balance": 5000,
-      "created_at": "2026-04-25T00:00:00",
-      "updated_at": "2026-04-25T00:00:00"
+      "user_id": "customer_demo_001",
+      "name": "FinGuard Demo Portfolio",
+      "total_value": 250000,
+      "cash_balance": 250000,
+      "created_at": "2026-04-26T00:00:00+00:00",
+      "updated_at": "2026-04-26T00:00:00+00:00"
     }
   ]
 }
@@ -86,7 +85,7 @@ POST /api/portfolios/{portfolio_id}/analyze
 
 ```json
 {
-  "timestamp": "2026-04-25T00:00:00",
+  "timestamp": "2026-04-26T00:00:00+00:00",
   "portfolio_id": 1,
   "crew_output": "Final analysis text",
   "agents_used": 9,
@@ -117,57 +116,16 @@ GET /api/sentiment?symbols=AAPL,MSFT
 GET /api/sentiment/{symbol}
 ```
 
-`GET /api/symbols` response:
-
-```json
-{
-  "symbols": [
-    { "symbol": "AAPL", "name": "Apple Inc.", "sector": "Technology" }
-  ],
-  "default_symbols": ["AAPL", "MSFT", "GOOGL", "TSLA", "AMZN", "NVDA"]
-}
-```
-
-Sentiment response:
-
-```json
-{
-  "agent": "MarketIntelligence",
-  "symbols": ["AAPL", "MSFT"],
-  "sentiment_analysis": "Text analysis"
-}
-```
-
-## Other Backend Endpoints
-
-Auth:
-
-```text
-POST /api/auth/register
-POST /api/auth/login
-GET /api/auth/me
-```
-
-Portfolio mutation:
-
-```text
-POST /api/portfolios
-POST /api/portfolio/{portfolio_id}/asset
-POST /api/portfolios/{portfolio_id}/transactions
-POST /api/portfolios/{portfolio_id}/quick-recommendation
-POST /api/portfolios/{portfolio_id}/recommendation
-POST /api/portfolio/{portfolio_id}/alert
-GET /api/portfolios/{portfolio_id}/alerts
-```
-
-Transaction utilities:
+### Transactions and Recommendations
 
 ```text
 POST /api/transaction/score-risk
 POST /api/transaction/get-ai-insights
+POST /api/portfolios/{portfolio_id}/quick-recommendation
+POST /api/portfolios/{portfolio_id}/recommendation
 ```
 
-Cases:
+## Case / Compliance Endpoints
 
 ```text
 GET /api/cases
@@ -178,29 +136,25 @@ POST /api/cases/{case_id}/notes
 POST /api/cases/{case_id}/transition
 POST /api/cases/{case_id}/analyze
 GET /api/cases/{case_id}/customer-360
-```
-
-Audit and SAR:
-
-```text
 GET /api/audit/logs
 GET /api/audit/verify
 GET /api/sar/{case_id}.json
 GET /api/sar/{case_id}.pdf
 ```
 
-Search:
+## Demo Seed Workflow
 
-```text
-POST /api/search/analyses
-POST /api/search/risks
-POST /api/search/market
+The repo includes a deterministic CLI seed path:
+
+```bash
+python scripts/seed_demo_data.py --reset
 ```
+
+This is intentionally a script-based workflow, not a public demo-only API route.
 
 ## Compatibility Rules
 
-- Prefer plural routes in new frontend code, for example `/api/portfolios/{id}`.
-- Keep response envelopes stable: `portfolios`, `assets`, `transactions`, `alerts`, `items`, `results`.
-- Add fields instead of renaming existing fields.
-- Frontend should handle both `error` and `detail` error responses.
-- Do not hardcode localhost URLs in source pages.
+- keep response envelopes stable: `portfolios`, `assets`, `transactions`, `alerts`, `items`, `results`
+- prefer plural route aliases in new frontend code
+- add fields instead of renaming or deleting fields
+- frontend should tolerate both `{ "error": "..." }` and `{ "detail": "..." }`

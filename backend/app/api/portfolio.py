@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from app.ai_client import (
     AIServiceError,
@@ -13,6 +13,7 @@ from app.ai_client import (
     request_portfolio_review,
     request_transaction_risk,
 )
+from app.auth import current_tenant_id
 from app.analysis_store import persist_analysis
 from app.api.common import (
     build_review_payload,
@@ -147,7 +148,9 @@ def list_assets(portfolio_id: int) -> dict[str, list[dict[str, Any]]]:
 @router.post("/api/portfolio/{portfolio_id}/transaction", status_code=201)
 @router.post("/api/portfolios/{portfolio_id}/transactions", status_code=201)
 def add_transaction(
-    portfolio_id: int, payload: CreateTransactionRequest | None = None
+    portfolio_id: int,
+    request: Request,
+    payload: CreateTransactionRequest | None = None,
 ) -> dict[str, Any]:
     payload = payload or CreateTransactionRequest()
     portfolio = get_portfolio_or_404(portfolio_id)
@@ -165,6 +168,7 @@ def add_transaction(
         payload_data,
         risk_result=risk_result,
         now=utc_now(),
+        tenant_id=current_tenant_id(request),
     )
     transaction = created["transaction"]
     response = {

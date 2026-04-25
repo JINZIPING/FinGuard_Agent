@@ -1,54 +1,55 @@
 # FinGuard
 
-FinGuard is an AI-assisted fraud and portfolio risk investigation system.
+FinGuard is an AI-assisted fraud and portfolio risk investigation workspace built for explainable multi-agent demos. It combines a React shell frontend, a FastAPI backend, and a FastAPI AI service with LangGraph orchestration, hybrid ML/rule scoring, case management, audit logs, and SAR export.
 
 ```text
-Frontend (React analyst UI)
+Frontend (React + HTML shell)
   -> Backend (FastAPI)
-      -> AI System (FastAPI + LangGraph)
-          -> Internal agent modules
+      -> SQLite / audit / cases / SAR / search
+      -> AI bridge
+          -> AI System (FastAPI + LangGraph)
+              -> 9 internal agents
+              -> OpenAI live mode or deterministic mock mode
+              -> ML/rules risk engine
 ```
 
-## Services
+## What Works Today
 
-- `frontend`: primary React frontend for the analyst UI.
-- `backend`: FastAPI business API, persistence, auth, cases, audit, SAR, and API compatibility.
-- `ai_system`: FastAPI AI service with LangGraph orchestration, OpenAI adapter, ML/rules risk adapter, and internal agents.
+- portfolio selection and AI analysis with final `analysis_trace`
+- market sentiment and recommendation flows
+- transaction risk scoring with auto-opened alerts and cases
+- case management, customer 360, audit verification, and SAR JSON/PDF export
+- deterministic demo seeding via `scripts/seed_demo_data.py`
+- deterministic `AI_RESPONSE_MODE=mock` for tests, demos, and Docker smoke checks
+- automated pytest suite and CI workflow
+- Docker health checks for frontend, backend, and AI system
 
-## Current Features
+## Assessment Artifact Pack
 
-- Portfolio APIs and AI analysis flow.
-- AI Analysis UI with portfolio dropdown.
-- LangGraph-backed multi-agent review.
-- Returned `analysis_trace` with node, crew, agent, status, duration, and output.
-- Market sentiment analysis.
-- Case, audit, SAR, search, auth, transaction, alert, and recommendation APIs.
-- Docker Compose local stack.
-- Backend GitHub Actions deployment to Azure Container Apps.
+- [System Architecture](docs/SYSTEM_ARCHITECTURE.md)
+- [Agent Design](docs/AGENT_DESIGN.md)
+- [Responsible AI Report](docs/RESPONSIBLE_AI_REPORT.md)
+- [AI Security Risk Register](docs/AI_SECURITY_RISK_REGISTER.md)
+- [MLSecOps / LLMSecOps Pipeline](docs/MLSECOPS_LLMSecOps_PIPELINE.md)
+- [Testing and Demo Runbook](docs/TESTING_AND_DEMO_RUNBOOK.md)
+- [Report Source Pack](docs/REPORT_SOURCE_PACK.md)
 
-## Internal Agents
+## Quick Start
 
-- Alert Intake
-- Customer Context
-- Risk Assessment
-- Risk Detection
-- Explanation
-- Escalation Summary
-- Portfolio Analysis
-- Market Intelligence
-- Compliance
-
-## Run Locally With Docker
-
-Create `ai_system/.env`:
+1. Copy `ai_system/.env.example` to `ai_system/.env`
+2. For a deterministic local demo, set:
 
 ```env
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=gpt-5.4-mini
-OPENAI_REASONING_EFFORT=medium
+AI_RESPONSE_MODE=mock
 ```
 
-Start the stack:
+3. Seed the demo dataset:
+
+```bash
+python scripts/seed_demo_data.py --reset
+```
+
+4. Start the stack:
 
 ```bash
 docker compose up --build
@@ -60,75 +61,55 @@ URLs:
 - Backend: `http://localhost:15050`
 - AI system: `http://localhost:18000`
 
-The Docker frontend is built with:
+## Main Demo Storylines
 
-```text
-REACT_APP_API_BASE_URL=http://localhost:15050
+### 1. Portfolio Analysis with Explainability
+
+1. Open the frontend
+2. Go to `AI Analysis`
+3. Run analysis on the seeded demo portfolio
+4. Review:
+   - final narrative
+   - `analysis_trace`
+   - multi-agent stage outputs
+
+### 2. Suspicious Transaction to SAR
+
+1. Open `Cases`
+2. Load the seeded suspicious case
+3. Review customer 360, timeline, and AI analysis actions
+4. Export SAR JSON or PDF
+
+## Environment Notes
+
+### Backend
+
+- `BACKEND_DB_PATH=./data/backend.db`
+- `AI_SYSTEM_URL=http://ai_system:8000` in Docker
+- `AUTH_ENFORCED=false` for demo mode
+- `JWT_SECRET=<set in controlled environments>`
+
+### AI System
+
+- `OPENAI_API_KEY=<required for live mode>`
+- `OPENAI_MODEL=gpt-5.4-mini`
+- `OPENAI_REASONING_EFFORT=medium`
+- `AI_RESPONSE_MODE=live|mock`
+
+## Testing
+
+Run the automated test suite:
+
+```bash
+pytest -q
 ```
 
-Backend CORS is configured in Compose as:
+CI also runs:
 
-```text
-CORS_ORIGINS=http://localhost:13000,http://localhost:3000
-```
+- frontend build checks
+- backend + AI tests
+- Docker smoke checks with seeded demo data
 
-## Main User Flow
+## API Contract
 
-1. Open `http://localhost:13000/`.
-2. Select a portfolio.
-3. Open the AI Analysis section and click `Run Analysis`.
-4. Review the final real `analysis_trace`.
-
-## Important API Docs
-
-See [api.md](api.md) for the concise frontend/backend contract.
-
-Common endpoints:
-
-- `GET /health`
-- `GET /api/portfolios`
-- `GET /api/portfolios/{id}`
-- `GET /api/portfolios/{id}/assets`
-- `GET /api/portfolios/{id}/transactions`
-- `POST /api/portfolios/{id}/analyze`
-- `GET /api/symbols`
-- `GET /api/sentiment?symbols=AAPL,MSFT`
-
-## Azure Backend CI/CD
-
-Workflow:
-
-```text
-.github/workflows/deploy-backend.yml
-```
-
-It builds `backend/Dockerfile` for `linux/amd64`, tags the image with `${{ github.sha }}`, pushes to:
-
-```text
-finguardacr.azurecr.io/finguard-backend:${{ github.sha }}
-```
-
-and updates Azure Container App:
-
-```text
-finguard-backend
-```
-
-Required GitHub secrets:
-
-- `AZURE_CREDENTIALS`
-- `AZURE_RESOURCE_GROUP`
-
-## Current Gaps
-
-- Some frontend flows still fall back to direct JSON responses because backend SSE endpoints are not implemented yet.
-- Agent trace is real after completion, but not streamed live yet.
-- Cases still rely on pasted bearer tokens instead of a full auth session UX.
-- SQLite is suitable for demo, but cloud persistence needs hardening.
-- CI/CD currently deploys backend only.
-
-## Related Docs
-
-- [PRD.md](PRD.md)
-- [api.md](api.md)
-- [FINGUARD_COMPREHENSIVE_GUIDE.md](FINGUARD_COMPREHENSIVE_GUIDE.md)
+See [api.md](api.md) for the current backend/frontend contract and operational notes.

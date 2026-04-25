@@ -188,7 +188,7 @@ tr:hover td{background:rgba(56,189,248,.03)}
     <button onclick="showPage('cases')"><span class="icon">&#128196;</span><span>Cases</span></button>
   </nav>
   <div class="agent-list">
-    <h3>9 CrewAI Agents</h3>
+    <h3>9 Specialist Agents</h3>
     <span class="pill">Alert Intake</span>
     <span class="pill">Context</span>
     <span class="pill">Risk</span>
@@ -232,16 +232,16 @@ tr:hover td{background:rgba(56,189,248,.03)}
         <strong style="color:var(--text)">Hybrid 3-tier scoring engine:</strong><br>
         &#x2460; <strong>13 Deterministic Rules</strong> (AML, sanctions, velocity, concentration) — 40% weight<br>
         &#x2461; <strong>GradientBoosting Classifier</strong> (97% accuracy) + <strong>IsolationForest</strong> (93% accuracy) — 60% weight<br>
-        &#x2462; <strong>LLM Fallback</strong> via Groq (llama-3.3-70b) for borderline scores (40-60)
+        &#x2462; <strong>LLM Layer</strong> via OpenAI-compatible `ai_system` responses, with optional deterministic mock mode for demos and tests
       </p>
     </div>
 
     <div class="card">
       <h3>&#128640; System Architecture</h3>
       <p style="color:var(--text2);font-size:.9rem;line-height:1.7">
-        <strong style="color:var(--text)">Backend:</strong> Flask + SQLAlchemy &nbsp;|&nbsp;
-        <strong style="color:var(--text)">Agents:</strong> CrewAI (Sequential) &nbsp;|&nbsp;
-        <strong style="color:var(--text)">LLM:</strong> Groq API &nbsp;|&nbsp;
+        <strong style="color:var(--text)">Backend:</strong> FastAPI + SQLite &nbsp;|&nbsp;
+        <strong style="color:var(--text)">Agents:</strong> LangGraph orchestration &nbsp;|&nbsp;
+        <strong style="color:var(--text)">LLM:</strong> OpenAI / Mock mode &nbsp;|&nbsp;
         <strong style="color:var(--text)">Vector DB:</strong> ChromaDB &nbsp;|&nbsp;
         <strong style="color:var(--text)">ML:</strong> scikit-learn
       </p>
@@ -604,7 +604,7 @@ tr:hover td{background:rgba(56,189,248,.03)}
   <!-- ──── AI ANALYSIS ──── -->
   <div id="page-analysis" class="page">
     <h2 class="page-title">&#129302; AI Analysis</h2>
-    <p class="page-desc">Run the full 9-agent CrewAI pipeline on a portfolio</p>
+    <p class="page-desc">Run the full 9-agent LangGraph portfolio review pipeline on a portfolio</p>
 
     <div class="card">
       <h3>Full Portfolio Analysis</h3>
@@ -785,9 +785,12 @@ tr:hover td{background:rgba(56,189,248,.03)}
 
     <div class="card">
       <div class="btn-group" style="margin-bottom:8px">
-        <input type="password" id="cases-token" placeholder="Bearer token (optional — if AUTH_ENFORCED is on)" style="flex:1;min-width:260px;padding:8px;border:1px solid #334;border-radius:6px;background:#111;color:#eee">
+        <input type="password" id="cases-token" placeholder="Bearer token (optional — leave empty when AUTH_ENFORCED=false)" style="flex:1;min-width:260px;padding:8px;border:1px solid #334;border-radius:6px;background:#111;color:#eee">
         <button class="btn btn-secondary" onclick="saveToken()">Save Token</button>
       </div>
+      <p style="color:#94a3b8;font-size:.8rem;margin:-2px 0 8px">
+        Demo mode works without a token. Save a bearer token here only when backend auth is enforced.
+      </p>
       <div class="btn-group">
         <select id="cases-state" style="padding:8px;border:1px solid #334;border-radius:6px;background:#111;color:#eee">
           <option value="">All states</option>
@@ -1601,7 +1604,7 @@ async function runAnalysis() {
   } catch(e) {
     let msg = e.message || 'Analysis failed';
     if (msg.includes('rate limit') || msg.includes('429')) msg = 'Rate limit exceeded — please wait a moment and try again';
-    else if (msg.includes('API key') || msg.includes('401'))  msg = 'API authentication failed — check GROQ_API_KEY';
+    else if (msg.includes('API key') || msg.includes('401'))  msg = 'API authentication failed — check OPENAI_API_KEY or switch AI_RESPONSE_MODE=mock';
     else if (msg.includes('Connection') || msg.includes('503')) msg = 'AI service temporarily unavailable — please try again later';
     resultHtml('ai-result', `<div style="padding:16px;background:rgba(239,68,68,.1);border-left:4px solid #ef4444;border-radius:6px"><div style="color:#fca5a5;font-weight:600;margin-bottom:8px">⚠️ Analysis Failed</div><div style="color:#fee2e2;line-height:1.6">${escapeHtml(msg)}</div></div>`, 'error');
     toast(msg, 'error');
@@ -2102,6 +2105,12 @@ async function exportSar(fmt) {
     }
     toast('SAR exported');
   } catch (e) { toast(e.message, 'error'); }
+}
+
+const _savedFinGuardToken = localStorage.getItem('finguard_token');
+if (_savedFinGuardToken) {
+  const tokenInput = document.getElementById('cases-token');
+  if (tokenInput) tokenInput.value = _savedFinGuardToken;
 }
 </script>
 </body>

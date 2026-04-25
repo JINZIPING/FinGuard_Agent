@@ -4,3 +4,8 @@ backend/.venv
 frontend/node_modules
 frontend/build
 **/__pycache__
+.pytest_tmp
+.tmp-tests
+pytest-cache-files-*
+**/.tmp-tests
+**/.pytest_tmp

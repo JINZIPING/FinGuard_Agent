@@ -76,6 +76,10 @@ def _sla_due(priority: str, opened_at: datetime) -> str:
 
 
 def _case_from_row(row: dict[str, Any], include_events: bool = False) -> dict[str, Any]:
+    assignee_email = None
+    if row.get("assignee_id"):
+        assignee = fetch_one("SELECT email FROM users WHERE id = ?", (row["assignee_id"],))
+        assignee_email = assignee.get("email") if assignee else None
     case = {
         "id": row["id"],
         "tenant_id": row.get("tenant_id"),
@@ -92,6 +96,7 @@ def _case_from_row(row: dict[str, Any], include_events: bool = False) -> dict[st
         "state": row.get("state") or row.get("status"),
         "priority": row.get("priority"),
         "assignee_id": row.get("assignee_id"),
+        "assignee_email": assignee_email,
         "opened_at": row.get("opened_at"),
         "closed_at": row.get("closed_at"),
         "sla_due_at": row.get("sla_due_at"),
