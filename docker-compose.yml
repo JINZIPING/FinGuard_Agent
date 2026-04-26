@@ -16,14 +16,34 @@ services:
     environment:
       CORS_ORIGINS: "*"
       BACKEND_DB_PATH: /app/data/backend.db
+      DATABASE_URL: postgresql://finguard:finguard@postgres:5432/finguard
       AI_SYSTEM_URL: http://ai_system:8000
       AI_SYSTEM_TIMEOUT_SECONDS: "120"
     ports:
       - "15050:5000"
     depends_on:
-      - ai_system
+      postgres:
+        condition: service_healthy
+      ai_system:
+        condition: service_started
     volumes:
       - backend_data:/app/data
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: finguard
+      POSTGRES_USER: finguard
+      POSTGRES_PASSWORD: finguard
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finguard -d finguard"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
   ai_system:
     build:
@@ -34,6 +54,11 @@ services:
         required: false
     environment:
       CHROMA_PERSIST_DIR: /app/data/chroma
+      OPENAI_MODEL: gpt-5.4-mini
+      OPENAI_REASONING_EFFORT: medium
+      LANGSMITH_TRACING: "false"
+      LANGSMITH_ENDPOINT: https://api.smith.langchain.com
+      LANGSMITH_PROJECT: finguard
     ports:
       - "18000:8000"
     volumes:
@@ -42,3 +67,4 @@ services:
 volumes:
   backend_data:
   ai_system_data:
+  postgres_data:

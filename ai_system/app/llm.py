@@ -10,6 +10,20 @@ try:
 except ImportError:  # pragma: no cover - optional at import time
     Groq = None
 
+try:
+    from langsmith import traceable
+    from langsmith.wrappers import wrap_openai
+except ImportError:  # pragma: no cover - tracing is optional at import time
+
+    def traceable(*_: object, **__: object) -> object:
+        def decorator(func: object) -> object:
+            return func
+
+        return decorator
+
+    def wrap_openai(client: object) -> object:
+        return client
+
 
 def is_rate_limit_error(error: Exception | str | None) -> bool:
     text = str(error or "").lower()
@@ -55,12 +69,27 @@ def _format_chat_error(error: Exception) -> str:
     )
 
 
+def _configured_api_keys() -> list[tuple[str, str]]:
+    keys = [
+        ("primary", os.getenv("OPENAI_API_KEY")),
+        ("backup", os.getenv("OPENAI_API_KEY_BACKUP")),
+    ]
+    return [(label, key) for label, key in keys if key]
+
+
+@traceable(name="openai_chat", run_type="llm")
 def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -> str:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError(
             "❌ LLM Configuration Error: GROQ_API_KEY environment variable is not set.\n"
             "Get a free key at https://console.groq.com and set GROQ_API_KEY."
+    api_keys = _configured_api_keys()
+    if not api_keys:
+        raise RuntimeError(
+            "❌ LLM Configuration Error: OPENAI_API_KEY environment variable is not set.\n"
+            "Please set OPENAI_API_KEY before calling ai_system analysis endpoints. "
+            "Optionally set OPENAI_API_KEY_BACKUP for rate-limit failover."
         )
     if Groq is None:
         raise RuntimeError(
@@ -91,5 +120,45 @@ def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -
                 time.sleep(wait_time)
                 continue
             raise RuntimeError(_format_chat_error(exc)) from exc
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    reasoning_effort = os.getenv("OPENAI_REASONING_EFFORT", "medium")
 
+    messages = [{"role": "user", "content": message}]
+    last_rate_limit_error: Exception | None = None
+
+    for key_index, (_, api_key) in enumerate(api_keys):
+        client = wrap_openai(OpenAI(api_key=api_key))
+
+        for attempt in range(max_retries):
+            try:
+                create_kwargs: dict = {
+                    "model": model,
+                    "messages": messages,
+                    "max_tokens": 2048,
+                }
+                if system_prompt:
+                    create_kwargs["system"] = system_prompt
+                # o-series models (o1, o3, o4, …) support reasoning; gpt-4o-mini does not
+                if model.startswith("o") and model[1:2].isdigit():
+                    create_kwargs["reasoning"] = {
+                        "type": "enabled",
+                        "budget_tokens": 1000,
+                    }
+                response = client.chat.completions.create(**create_kwargs)
+                return response.choices[0].message.content
+            except Exception as exc:
+                if not is_rate_limit_error(exc):
+                    raise RuntimeError(_format_chat_error(exc)) from exc
+
+                last_rate_limit_error = exc
+                has_backup_key = key_index < len(api_keys) - 1
+                if has_backup_key:
+                    break
+                if attempt < max_retries - 1:
+                    time.sleep(2**attempt)
+                    continue
+                raise RuntimeError(_format_chat_error(exc)) from exc
+
+    if last_rate_limit_error is not None:
+        raise RuntimeError(_format_chat_error(last_rate_limit_error)) from last_rate_limit_error
     raise RuntimeError("❌ LLM Call Failed: exhausted retries without a response")

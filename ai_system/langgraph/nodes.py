@@ -13,6 +13,16 @@ from ai_system.app.analysis_utils import ml_score_transactions
 from ai_system.app.llm import is_rate_limit_error
 from ai_system.langgraph.state import PortfolioAnalysisState
 
+try:
+    from langsmith import traceable
+except ImportError:  # pragma: no cover - tracing is optional at import time
+
+    def traceable(*_: object, **__: object) -> object:
+        def decorator(func: object) -> object:
+            return func
+
+        return decorator
+
 
 def _truncate_error(exc: Exception) -> str:
     return str(exc)[:200]
@@ -190,6 +200,7 @@ def _escalation_snapshot(state: PortfolioAnalysisState) -> str:
     return "Escalation path: queue for human review if related alerts or repeated high-risk transactions continue."
 
 
+@traceable(name="langgraph_ingest_request", run_type="chain")
 def ingest_request(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     state.setdefault("findings", [])
     state.setdefault("errors", [])
@@ -227,6 +238,7 @@ def ingest_request(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     return state
 
 
+@traceable(name="langgraph_quick_recommendation", run_type="chain")
 def run_quick_recommendation(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     start = perf_counter()
     state["response"] = risk.quick_portfolio_recommendation(
@@ -249,6 +261,7 @@ def run_quick_recommendation(state: PortfolioAnalysisState) -> PortfolioAnalysis
     return state
 
 
+@traceable(name="langgraph_crew_1_risk_analysis", run_type="chain")
 def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     if state.get("rate_limited"):
         return state
@@ -359,6 +372,7 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
         return state
 
 
+@traceable(name="langgraph_crew_2_portfolio_analysis", run_type="chain")
 def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     if state.get("rate_limited"):
         return state
@@ -455,6 +469,7 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
         return state
 
 
+@traceable(name="langgraph_crew_3_summary_escalation", run_type="chain")
 def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     if state.get("rate_limited"):
         return state
@@ -540,6 +555,7 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
         return state
 
 
+@traceable(name="langgraph_compile_quick_response", run_type="chain")
 def compile_quick_response(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     response = state.get("response") or {}
     response["analysis_trace"] = state.get("analysis_trace", [])
@@ -548,6 +564,7 @@ def compile_quick_response(state: PortfolioAnalysisState) -> PortfolioAnalysisSt
     return state
 
 
+@traceable(name="langgraph_compile_full_response", run_type="chain")
 def compile_full_response(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     portfolio = state.get("portfolio") or {}
     ml_summary = state.get("ml_summary", "")
