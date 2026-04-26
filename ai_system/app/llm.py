@@ -90,7 +90,9 @@ def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -
             return response.choices[0].message.content
         except Exception as exc:
             if is_rate_limit_error(exc) and attempt < max_retries - 1:
-                time.sleep(2**attempt)
+                # OpenAI rate limits: wait exponentially longer (30s, 60s, 120s)
+                wait_time = 30 * (2 ** attempt)
+                time.sleep(wait_time)
                 continue
             raise RuntimeError(_format_chat_error(exc)) from exc
 

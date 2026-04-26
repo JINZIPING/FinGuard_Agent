@@ -197,8 +197,11 @@ def analyze_portfolio(portfolio_id: int) -> dict[str, Any]:
     review_portfolio, review_transactions = build_review_payload(portfolio_id)
     try:
         result = request_portfolio_review(review_portfolio, review_transactions, "full")
-    except AIServiceError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (AIServiceError, Exception) as exc:
+        msg = str(exc)
+        if "rate limit" in msg.lower() or "429" in msg:
+            raise HTTPException(status_code=429, detail="AI analysis is temporarily rate-limited. Please try again in 30-60 seconds.") from exc
+        raise HTTPException(status_code=500, detail=f"AI analysis failed: {msg[:300]}") from exc
     persist_analysis(
         portfolio_id,
         "full",
@@ -219,8 +222,11 @@ def quick_recommendation(
         result = request_portfolio_review(
             review_portfolio, review_transactions, payload.mode
         )
-    except AIServiceError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (AIServiceError, Exception) as exc:
+        msg = str(exc)
+        if "rate limit" in msg.lower() or "429" in msg:
+            raise HTTPException(status_code=429, detail="AI recommendation is temporarily rate-limited. Please try again in 30-60 seconds.") from exc
+        raise HTTPException(status_code=500, detail=f"AI recommendation failed: {msg[:300]}") from exc
     persist_analysis(
         portfolio_id,
         payload.mode,
@@ -244,8 +250,11 @@ def get_recommendation(
         result = request_market_recommendation(
             symbol, float(portfolio["total_value"]), payload.risk_profile
         )
-    except AIServiceError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (AIServiceError, Exception) as exc:
+        msg = str(exc)
+        if "rate limit" in msg.lower() or "429" in msg:
+            raise HTTPException(status_code=429, detail="AI recommendation is temporarily rate-limited. Please try again in 30-60 seconds.") from exc
+        raise HTTPException(status_code=500, detail=f"AI recommendation failed: {msg[:300]}") from exc
     if vector_store is not None:
         try:
             vector_store.store_market_analysis(
