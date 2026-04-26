@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from ai_system.app.agents import (
     compliance_agent as compliance,
@@ -26,6 +26,16 @@ from ai_system.app.schemas import (
 
 
 app = FastAPI(title="FinGuard AI System")
+
+
+def _handle_agent_error(exc: Exception) -> dict[str, Any]:
+    """Format agent errors for frontend consumption."""
+    msg = str(exc)
+    if "GROQ_API_KEY" in msg or "not set" in msg:
+        return {"error": "LLM Configuration Error: GROQ_API_KEY is not set in deployment", "detail": msg[:200]}
+    if is_rate_limit_error(exc):
+        return {"error": "Rate Limited", "detail": "AI service is temporarily rate-limited. Please retry in 30-60 seconds."}
+    return {"error": "Agent Error", "detail": msg[:300]}
 
 # ── Fast pattern-based pre-filter (runs before the LLM guardrail) ──
 _BLOCK_RE = re.compile(
@@ -54,62 +64,86 @@ def health() -> dict[str, str]:
 
 @app.post("/agents/risk/invoke")
 def invoke_risk_agent(payload: PortfolioReviewRequest) -> dict[str, Any]:
-    return risk.invoke(
-        payload.portfolio.model_dump(),
-        [txn.model_dump() for txn in payload.transactions],
-        payload.mode,
-    )
+    try:
+        return risk.invoke(
+            payload.portfolio.model_dump(),
+            [txn.model_dump() for txn in payload.transactions],
+            payload.mode,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=_handle_agent_error(exc)) from exc
 
 
 @app.post("/agents/portfolio/invoke")
 def invoke_portfolio_agent(payload: PortfolioReviewRequest) -> dict[str, Any]:
-    return portfolio.invoke(
-        payload.portfolio.model_dump(),
-        [txn.model_dump() for txn in payload.transactions],
-        payload.mode,
-    )
+    try:
+        return portfolio.invoke(
+            payload.portfolio.model_dump(),
+            [txn.model_dump() for txn in payload.transactions],
+            payload.mode,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=_handle_agent_error(exc)) from exc
 
 
 @app.post("/agents/compliance/invoke")
 def invoke_compliance_agent(payload: PortfolioReviewRequest) -> dict[str, Any]:
-    return compliance.invoke(
-        payload.portfolio.model_dump(),
-        [txn.model_dump() for txn in payload.transactions],
-        payload.mode,
-    )
+    try:
+        return compliance.invoke(
+            payload.portfolio.model_dump(),
+            [txn.model_dump() for txn in payload.transactions],
+            payload.mode,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=_handle_agent_error(exc)) from exc
 
 
 @app.post("/orchestrate/portfolio-review")
 def orchestrate_portfolio_review(payload: PortfolioReviewRequest) -> dict[str, Any]:
-    return portfolio_review(
-        payload.portfolio.model_dump(),
-        [txn.model_dump() for txn in payload.transactions],
-        payload.mode,
-    )
+    try:
+        return portfolio_review(
+            payload.portfolio.model_dump(),
+            [txn.model_dump() for txn in payload.transactions],
+            payload.mode,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=_handle_agent_error(exc)) from exc
 
 
 @app.post("/market/sentiment")
 def get_market_sentiment(payload: MarketSentimentRequest) -> dict[str, Any]:
-    return market.analyze_sentiment(payload.symbols)
+    try:
+        return market.analyze_sentiment(payload.symbols)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=_handle_agent_error(exc)) from exc
 
 
 @app.post("/market/recommendation")
 def get_market_recommendation(payload: MarketRecommendationRequest) -> dict[str, Any]:
-    return market.generate_recommendation(
-        payload.symbol, payload.portfolio_size, payload.risk_profile
-    )
+    try:
+        return market.generate_recommendation(
+            payload.symbol, payload.portfolio_size, payload.risk_profile
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=_handle_agent_error(exc)) from exc
 
 
 @app.post("/risk/score-transaction")
 def score_transaction(payload: TransactionRiskRequest) -> dict[str, Any]:
-    return risk.score_transaction(payload.transaction, payload.customer_profile)
+    try:
+        return risk.score_transaction(payload.transaction, payload.customer_profile)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=_handle_agent_error(exc)) from exc
 
 
 @app.post("/explanation/transaction-insights")
 def get_transaction_insights(payload: TransactionInsightRequest) -> dict[str, Any]:
-    return explanation.explain_transaction_risk(
-        payload.transaction, payload.score, payload.factors
-    )
+    try:
+        return explanation.explain_transaction_risk(
+            payload.transaction, payload.score, payload.factors
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=_handle_agent_error(exc)) from exc
 
 
 @app.post("/guardrail/check-query")
