@@ -10,6 +10,20 @@ try:
 except ImportError:  # pragma: no cover - optional at import time
     OpenAI = None
 
+try:
+    from langsmith import traceable
+    from langsmith.wrappers import wrap_openai
+except ImportError:  # pragma: no cover - tracing is optional at import time
+
+    def traceable(*_: object, **__: object) -> object:
+        def decorator(func: object) -> object:
+            return func
+
+        return decorator
+
+    def wrap_openai(client: object) -> object:
+        return client
+
 
 def is_rate_limit_error(error: Exception | str | None) -> bool:
     text = str(error or "").lower()
@@ -55,6 +69,7 @@ def _format_chat_error(error: Exception) -> str:
     )
 
 
+@traceable(name="openai_chat", run_type="llm")
 def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -68,7 +83,7 @@ def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -
             "Install ai_system dependencies before calling ai_system analysis endpoints."
         )
 
-    client = OpenAI(api_key=api_key)
+    client = wrap_openai(OpenAI(api_key=api_key))
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     reasoning_effort = os.getenv("OPENAI_REASONING_EFFORT", "medium")
 
