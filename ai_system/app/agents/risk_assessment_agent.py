@@ -11,6 +11,13 @@ from ai_system.app.llm import chat, is_rate_limit_error
 from ai_system.app.ml import get_risk_engine
 
 
+def _format_money(value: Any) -> str:
+    try:
+        return f"${float(value):,.2f}"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
 def _score_transaction_risk(
     transaction: dict, customer_profile: dict | None = None
 ) -> dict:
@@ -74,7 +81,7 @@ Provide a concise, actionable explanation of why this transaction may or
 may not be risky, and recommend next steps.
 
 Transaction Summary:
-  Amount:             ${txn.get("amount", "N/A"):,.2f}
+  Amount:             {_format_money(txn.get("amount"))}
   Type:               {txn.get("transaction_type", "N/A")}
   Sender Country:     {txn.get("sender_country", "N/A")}
   Receiver Country:   {txn.get("receiver_country", "N/A")}
@@ -476,6 +483,32 @@ Return prioritized hedging strategy."""
 def quick_portfolio_recommendation(
     portfolio_data: dict[str, Any], transactions: list[dict[str, Any]]
 ) -> dict:
+    assets = portfolio_data.get("assets", []) or []
+    asset_lines = []
+    for asset in assets[:8]:
+        symbol = asset.get("symbol") or "UNKNOWN"
+        name = asset.get("name") or symbol
+        quantity = asset.get("quantity", "N/A")
+        current_price = asset.get("current_price", "N/A")
+        asset_type = asset.get("asset_type") or "asset"
+        asset_lines.append(
+            f"- {symbol} ({name}), type={asset_type}, quantity={quantity}, current_price={current_price}"
+        )
+    holdings_summary = "\n".join(asset_lines) if asset_lines else "- No holdings supplied"
+
+    transaction_lines = []
+    for txn in transactions[:5]:
+        transaction_lines.append(
+            "- "
+            f"{txn.get('type', 'transaction')} "
+            f"{txn.get('quantity', 'N/A')} "
+            f"{txn.get('symbol', 'UNKNOWN')} "
+            f"at {txn.get('price', 'N/A')}"
+        )
+    transactions_summary = (
+        "\n".join(transaction_lines) if transaction_lines else "- No recent transactions supplied"
+    )
+
     portfolio_summary = (
         f"Portfolio '{portfolio_data.get('name')}': "
         f"${portfolio_data.get('total_value', 0):,.0f}, "
@@ -485,10 +518,18 @@ def quick_portfolio_recommendation(
 
     try:
         prompt = (
-            "Quick risk assessment (2-3 sentences):\n"
-            f"{portfolio_summary}\n"
-            "Key risks? Recommendation?\n"
-            f"{ml_summary}"
+            "You are reviewing a financial investment portfolio. "
+            "The portfolio name is only a user-defined label; do not infer asset type, technology stack, "
+            "database usage, or business activity from the name.\n\n"
+            "Write a quick risk assessment in 2-3 sentences based only on the holdings, recent transactions, "
+            "cash balance, total value, and ML pre-screening below.\n\n"
+            f"Portfolio label: {portfolio_data.get('name')}\n"
+            f"Total value: ${portfolio_data.get('total_value', 0):,.0f}\n"
+            f"Cash balance: ${portfolio_data.get('cash_balance', 0):,.0f}\n\n"
+            f"Holdings:\n{holdings_summary}\n\n"
+            f"Recent transactions:\n{transactions_summary}\n\n"
+            f"ML pre-screening:\n{ml_summary}\n\n"
+            "Return: key risks, whether any immediate action is needed, and one practical recommendation."
         )
         recommendation = chat(prompt)
         crew_output = (
