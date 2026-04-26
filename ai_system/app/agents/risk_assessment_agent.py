@@ -207,6 +207,30 @@ def score_transaction_risk(
 
 
 def assess_portfolio_risk(portfolio_data: dict, market_conditions: dict) -> dict:
+    # Step 1: Analyze market exposure
+    step1_prompt = """Analyze the market risk exposure of this portfolio:
+- Calculate beta and volatility
+- Identify correlation risks
+- Assess market timing risks
+
+Portfolio:
+""" + json.dumps(portfolio_data, indent=2)
+    
+    step1_result = chat(step1_prompt)
+    
+    # Step 2: Analyze concentration risk
+    step2_prompt = """Identify concentration risks in this portfolio:
+- Sector concentration
+- Single stock exposure
+- Geographic concentration
+- Asset class concentration
+
+Portfolio:
+""" + json.dumps(portfolio_data, indent=2)
+    
+    step2_result = chat(step2_prompt)
+    
+    # Step 3: Comprehensive assessment
     prompt = f"""You are a risk assessment expert. Perform comprehensive portfolio risk assessment:
 
 Portfolio:
@@ -215,22 +239,31 @@ Portfolio:
 Market Conditions:
 {json.dumps(market_conditions, indent=2)}
 
-Assess:
-1. Market risk (Beta, Volatility, correlation)
-2. Concentration risk (sector, asset class, single stock)
-3. Liquidity risk
-4. Counterparty risk
-5. Currency risk (if applicable)
-6. Interest rate risk
-7. Overall portfolio score (0-100)
+Previous analysis findings:
+Market Risk Assessment: {step1_result}
+Concentration Risk Assessment: {step2_result}
 
-Return detailed risk breakdown with heat map and recommendations."""
+Now provide:
+1. Liquidity risk assessment
+2. Counterparty risk analysis
+3. Currency risk (if applicable)
+4. Interest rate risk exposure
+5. Overall portfolio risk score (0-100)
+6. Key Risk Drivers
+7. Actionable Recommendations
+
+Return detailed risk breakdown with specific insights and recommendations."""
     result = chat(prompt)
     return {
         "agent": "RiskAssessment",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "assessment_type": "portfolio",
-        "risk_analysis": result or "Risk assessment unavailable.",
+        "thinking_steps": [
+            {"step": 1, "analysis": "Market Risk Analysis", "details": step1_result[:500]},
+            {"step": 2, "analysis": "Concentration Risk Analysis", "details": step2_result[:500]},
+            {"step": 3, "analysis": "Comprehensive Assessment", "details": result[:500]},
+        ],
+        "risk_analysis": f"**Market Risk Analysis:**\n{step1_result}\n\n**Concentration Risk Analysis:**\n{step2_result}\n\n**Comprehensive Assessment:**\n{result}",
         "complete": True,
     }
 
@@ -241,24 +274,34 @@ def detect_fraud_risk(
     ml_pre_scores: list[dict[str, Any]] | None = None,
 ) -> dict:
     ml_summary_lines: list[str] = []
+    high_risk_txns = []
+    
     if ml_pre_scores:
         for index, result in enumerate(ml_pre_scores):
+            score = result.get('final_score', result.get('risk_score', 0))
+            label = result.get('risk_label', '?')
             ml_summary_lines.append(
-                f"  Txn {index + 1}: score={result.get('final_score', result.get('risk_score', '?'))}/100 "
-                f"label={result.get('risk_label', '?')} "
+                f"  Txn {index + 1}: score={score}/100 "
+                f"label={label} "
                 f"flags=[{', '.join(result.get('flags', []))}]"
             )
+            if score and score >= 55:
+                high_risk_txns.append((index, score, label))
     else:
         engine = get_risk_engine()
         if engine:
             for index, txn in enumerate(transaction_history[:20]):
                 try:
                     result = engine.score(txn)
+                    score = result['final_score']
+                    label = result['risk_label']
                     ml_summary_lines.append(
-                        f"  Txn {index + 1}: score={result['final_score']}/100 "
-                        f"label={result['risk_label']} method={result['method']} "
+                        f"  Txn {index + 1}: score={score}/100 "
+                        f"label={label} method={result['method']} "
                         f"flags=[{', '.join(result['flags'])}]"
                     )
+                    if score >= 55:
+                        high_risk_txns.append((index, score, label))
                 except Exception:
                     ml_summary_lines.append(f"  Txn {index + 1}: ML scoring failed")
 
@@ -269,26 +312,62 @@ def detect_fraud_risk(
             + "\n".join(ml_summary_lines)
             + "\n\nUse these ML scores as your baseline. Add expert analysis on top."
         )
+    
+    # Step 1: Analyze high-risk transactions
+    step1_result = ""
+    if high_risk_txns:
+        hrt_list = ", ".join([f"Txn {idx+1} (score: {score}/100, {label})" for idx, score, label in high_risk_txns])
+        step1_prompt = f"""Analyze these high-risk transactions for fraud indicators:
+{hrt_list}
 
+Transactions:
+{json.dumps([transaction_history[i] for i, _, _ in high_risk_txns[:5]], indent=2)}
+
+Identify specific fraud patterns, velocity concerns, and behavioral anomalies."""
+        step1_result = chat(step1_prompt)
+    
+    # Step 2: Portfolio-level analysis
+    step2_prompt = f"""Perform portfolio-level fraud risk assessment:
+
+Portfolio Data:
+{json.dumps(portfolio_data, indent=2)}
+
+Assess for:
+- Unusual account activity patterns
+- Geographic inconsistencies
+- Account takeover signs
+- Layering/structuring patterns
+- Potential money laundering"""
+    
+    step2_result = chat(step2_prompt)
+    
+    # Step 3: Comprehensive assessment
     prompt = (
-        "You are a financial fraud detection expert. Analyse these transactions "
-        "and portfolio for suspicious activity:\n\n"
+        "You are a financial fraud detection expert. Provide comprehensive fraud risk assessment:\n\n"
         f"Transaction History:\n{json.dumps(transaction_history[:10], indent=2)}\n\n"
         f"Portfolio Data:\n{json.dumps(portfolio_data, indent=2)}"
         f"{ml_section}\n\n"
-        "Identify:\n"
-        "1. Unusual transaction patterns\n"
-        "2. Potential fraud indicators\n"
-        "3. Risk level (low/medium/high)\n"
-        "4. Specific alerts needed\n"
-        "5. Recommended actions"
+        f"High-Risk Transaction Analysis:\n{step1_result}\n\n"
+        f"Portfolio-Level Analysis:\n{step2_result}\n\n"
+        "Provide:\n"
+        "1. Overall fraud risk assessment\n"
+        "2. Key risk drivers\n"
+        "3. Specific transaction alerts\n"
+        "4. Recommended SAR filing if warranted\n"
+        "5. Immediate action items"
     )
     response = chat(prompt)
+    
     return {
         "agent": "RiskDetector",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "alert_type": "fraud_risk",
-        "assessment": response or "Fraud analysis unavailable.",
+        "thinking_steps": [
+            {"step": 1, "analysis": "High-Risk Transaction Analysis", "details": step1_result[:300]} if step1_result else None,
+            {"step": 2, "analysis": "Portfolio-Level Analysis", "details": step2_result[:300]},
+            {"step": 3, "analysis": "Comprehensive Assessment", "details": response[:300]},
+        ],
+        "assessment": f"**Transaction-Level Analysis:**\n{step1_result}\n\n**Portfolio Analysis:**\n{step2_result}\n\n**Comprehensive Assessment:**\n{response or 'Fraud analysis unavailable.'}",
     }
 
 

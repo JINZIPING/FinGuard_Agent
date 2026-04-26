@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.ai_client import AIServiceError, request_agent_review, request_portfolio_review
 from app.audit import record as record_audit
@@ -517,7 +517,7 @@ def transition_case(
 
 @router.post("/api/cases/{case_id}/analyze")
 def analyze_case(
-    case_id: int, request: Request, payload: dict[str, Any] | None = None
+    case_id: int, request: Request, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
     require_auth(request)
     case = _tenant_case_or_404(request, case_id)

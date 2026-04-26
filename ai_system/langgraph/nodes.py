@@ -89,6 +89,50 @@ def _agent_event(
     )
 
 
+def _thinking_step_event(
+    state: PortfolioAnalysisState,
+    *,
+    node: str,
+    agent_name: str,
+    step_num: int,
+    analysis_type: str,
+    details: str,
+) -> None:
+    """Emit a thinking step event for intermediate reasoning."""
+    _append_trace(
+        state,
+        {
+            "type": "thinking",
+            "node": node,
+            "agent_name": agent_name,
+            "step": step_num,
+            "analysis_type": analysis_type,
+            "details": details,
+            "status": "in_progress",
+        },
+    )
+
+
+def _emit_thinking_steps(
+    state: PortfolioAnalysisState,
+    node: str,
+    agent_name: str,
+    thinking_steps: list[dict] | None,
+) -> None:
+    """Emit all thinking steps from an agent response."""
+    if thinking_steps:
+        for step_info in thinking_steps:
+            if step_info:  # skip None entries
+                _thinking_step_event(
+                    state,
+                    node=node,
+                    agent_name=agent_name,
+                    step_num=step_info.get("step", 0),
+                    analysis_type=step_info.get("analysis", ""),
+                    details=step_info.get("details", ""),
+                )
+
+
 def _compliance_snapshot(transactions: list[dict]) -> str:
     findings: list[str] = []
     unknown_types = sorted(
@@ -230,6 +274,23 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
         )
         state["crews_run"] = 1
         duration_ms = _elapsed_ms(start)
+        
+        # Emit thinking steps for Risk Assessment
+        _emit_thinking_steps(
+            state,
+            node="run_full_crew_one",
+            agent_name="Risk Assessment Agent",
+            thinking_steps=risk_assessment.get("thinking_steps"),
+        )
+        
+        # Emit thinking steps for Fraud Detection
+        _emit_thinking_steps(
+            state,
+            node="run_full_crew_one",
+            agent_name="Risk Detection Agent",
+            thinking_steps=fraud_assessment.get("thinking_steps"),
+        )
+        
         _terminal_event(
             state,
             node="run_full_crew_one",
@@ -325,6 +386,15 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
         )
         state["crews_run"] = 2
         duration_ms = _elapsed_ms(start)
+        
+        # Emit thinking steps for Portfolio Analysis
+        _emit_thinking_steps(
+            state,
+            node="run_full_crew_two",
+            agent_name="Portfolio Analyst",
+            thinking_steps=portfolio_analysis.get("thinking_steps"),
+        )
+        
         _divider_event(
             state,
             node="run_full_crew_two",

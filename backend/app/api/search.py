@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 
 from app.ai_client import AIServiceError, check_search_guardrail, search_knowledge
 from app.api.common import search_analysis_records, search_risk_records
@@ -46,7 +46,7 @@ def _llm_search(query: str, context_docs: list[dict]) -> dict[str, Any]:
 
 @router.post("/api/search/analyses")
 def search_analyses(
-    payload: dict[str, Any] | None = None,
+    payload: dict[str, Any] = Body(...),
 ) -> dict[str, list[dict[str, Any]]]:
     payload = payload or {}
     query = str(payload.get("query") or "").strip()
@@ -81,7 +81,7 @@ def search_analyses(
 
 @router.post("/api/search/risks")
 def search_risks(
-    payload: dict[str, Any] | None = None,
+    payload: dict[str, Any] = Body(...),
 ) -> dict[str, list[dict[str, Any]]]:
     payload = payload or {}
     query = str(payload.get("query") or "").strip()
@@ -114,7 +114,7 @@ def search_risks(
 
 @router.post("/api/search/market")
 def search_market(
-    payload: dict[str, Any] | None = None,
+    payload: dict[str, Any] = Body(...),
 ) -> dict[str, list[dict[str, Any]]]:
     payload = payload or {}
     query = str(payload.get("query") or "").strip()

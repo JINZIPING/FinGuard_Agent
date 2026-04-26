@@ -9,21 +9,62 @@ from ai_system.app.llm import chat
 
 
 def analyze_portfolio(portfolio: dict) -> dict:
+    # Step 1: Allocation Analysis
+    step1_prompt = (
+        "Analyze the asset allocation of this portfolio:\n"
+        "1. Current allocation breakdown\n"
+        "2. Comparison to industry benchmarks\n"
+        "3. Concentration risks\n\n"
+        f"Portfolio Data:\n{json.dumps(portfolio, indent=2)}"
+    )
+    step1_response = chat(step1_prompt)
+    
+    # Step 2: Diversification Assessment
+    step2_prompt = (
+        "Evaluate diversification of this portfolio:\n"
+        "1. Sector diversification score\n"
+        "2. Asset class diversification\n"
+        "3. Geographic diversification\n"
+        "4. Correlation analysis between holdings\n\n"
+        f"Portfolio Data:\n{json.dumps(portfolio, indent=2)}"
+    )
+    step2_response = chat(step2_prompt)
+    
+    # Step 3: Performance & Risk Analysis
+    step3_prompt = (
+        "Assess performance and risk profile:\n"
+        "1. Historical performance vs benchmarks\n"
+        "2. Risk metrics (Sharpe ratio, Beta)\n"
+        "3. Volatility analysis\n"
+        "4. Downside risk assessment\n\n"
+        f"Portfolio Data:\n{json.dumps(portfolio, indent=2)}"
+    )
+    step3_response = chat(step3_prompt)
+    
+    # Step 4: Comprehensive recommendations
     prompt = (
-        "You are a professional portfolio analyst. Analyse this portfolio and provide:\n"
-        "1. Asset allocation assessment\n"
-        "2. Diversification score (0-100)\n"
-        "3. Risk assessment\n"
-        "4. Performance review\n"
-        "5. Specific recommendations\n\n"
-        f"Portfolio Data:\n{json.dumps(portfolio, indent=2)}\n\n"
-        "Provide structured analysis with scores and specific actionable recommendations."
+        "You are a professional portfolio analyst. Provide comprehensive portfolio analysis:\n\n"
+        f"Asset Allocation Analysis:\n{step1_response}\n\n"
+        f"Diversification Assessment:\n{step2_response}\n\n"
+        f"Performance & Risk Analysis:\n{step3_response}\n\n"
+        "Provide actionable recommendations:\n"
+        "1. Rebalancing suggestions\n"
+        "2. Risk mitigation strategies\n"
+        "3. Performance optimization opportunities\n"
+        "4. Specific buy/sell recommendations"
     )
     response = chat(prompt)
+    
     return {
         "agent": "PortfolioAnalyzer",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "analysis": response or "Portfolio analysis unavailable.",
+        "thinking_steps": [
+            {"step": 1, "analysis": "Asset Allocation Analysis", "details": step1_response[:400]},
+            {"step": 2, "analysis": "Diversification Assessment", "details": step2_response[:400]},
+            {"step": 3, "analysis": "Performance & Risk", "details": step3_response[:400]},
+            {"step": 4, "analysis": "Recommendations", "details": response[:400]},
+        ],
+        "analysis": f"**Asset Allocation:**\n{step1_response}\n\n**Diversification:**\n{step2_response}\n\n**Performance & Risk:**\n{step3_response}\n\n**Recommendations:**\n{response or 'Portfolio analysis unavailable.'}",
     }
 
 
