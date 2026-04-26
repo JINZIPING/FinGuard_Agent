@@ -1835,6 +1835,20 @@ async function runSearch() {
     // AI agent response (new LLM-powered search)
     let html = '';
     if (d.agent_response) {
+      // Add thinking block if available
+      if (d.thinking) {
+        const thinkBox = document.createElement('div');
+        thinkBox.className = 'think-block';
+        thinkBox.innerHTML = `
+          <div class="think-header">
+            <span class="think-label">thinking…</span>
+            <button class="think-toggle" onclick="(function(){var s=this.parentElement.nextElementSibling;if(s){var hidden=s.style.display==='none';s.style.display=hidden?'':'none';this.textContent=hidden?'Hide thinking':'Show thinking';}}).call(this)">Hide thinking</button>
+          </div>
+          <div class="think-content" style="display:none;">${escapeHtml(d.thinking).replace(/\n/g, '<br>')}</div>
+        `;
+        searchEl.appendChild(thinkBox);
+      }
+
       const pills = [
         { label: `🤖 AI Search Result`, tone: 'green' },
         d.context_count != null ? { label: `${d.context_count} context docs` } : null,

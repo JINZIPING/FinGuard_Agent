@@ -246,7 +246,7 @@ def search_knowledge_base(payload: dict[str, Any]) -> dict[str, Any]:
     result = {
         "agent": "KnowledgeSearch",
         "query": query,
-        "response": response,
+        "agent_response": response,
         "context_count": len(context_docs),
         "rate_limited": rate_limited,
         "timestamp": ts,
