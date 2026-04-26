@@ -231,6 +231,7 @@ def search_knowledge_base(payload: dict[str, Any]) -> dict[str, Any]:
     rate_limited = False
     try:
         response = chat(prompt)
+        response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
     except Exception as exc:
         if is_rate_limit_error(exc):
             response = "⚠️ AI search is temporarily rate-limited. Please wait 30–60 seconds and try again."
