@@ -47,7 +47,7 @@ def _llm_search(query: str, context_docs: list[dict]) -> dict[str, Any]:
 @router.post("/api/search/analyses")
 def search_analyses(
     payload: dict[str, Any] = Body(...),
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, Any]:
     payload = payload or {}
     query = str(payload.get("query") or "").strip()
     portfolio_id = payload.get("portfolio_id")
@@ -82,7 +82,7 @@ def search_analyses(
 @router.post("/api/search/risks")
 def search_risks(
     payload: dict[str, Any] = Body(...),
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, Any]:
     payload = payload or {}
     query = str(payload.get("query") or "").strip()
     portfolio_id = payload.get("portfolio_id")
@@ -115,7 +115,7 @@ def search_risks(
 @router.post("/api/search/market")
 def search_market(
     payload: dict[str, Any] = Body(...),
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, Any]:
     payload = payload or {}
     query = str(payload.get("query") or "").strip()
     symbol = str(payload.get("symbol") or "").strip() or None
