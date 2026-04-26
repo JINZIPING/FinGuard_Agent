@@ -2,8 +2,9 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        REACT_APP_API_BASE_URL: http://localhost:15050
+      # Omit REACT_APP_API_BASE_URL so the app defaults to the relative
+      # path '/api', which Nginx then proxies to the backend. This makes
+      # the image work on any deployment domain without rebuilding.
     ports:
       - "13000:80"
     depends_on:
@@ -13,23 +14,31 @@ services:
     build:
       context: ./backend
     environment:
-      CORS_ORIGINS: http://localhost:13000,http://localhost:3000
+      CORS_ORIGINS: "*"
+      BACKEND_DB_PATH: /app/data/backend.db
+      AI_SYSTEM_URL: http://ai_system:8000
+      AI_SYSTEM_TIMEOUT_SECONDS: "120"
     ports:
       - "15050:5000"
     depends_on:
       - ai_system
     volumes:
-      - ./backend/data:/app/data
+      - backend_data:/app/data
 
   ai_system:
     build:
       context: .
       dockerfile: ai_system/Dockerfile
     env_file:
-      - ./ai_system/.env
+      - path: ./ai_system/.env
+        required: false
     environment:
       CHROMA_PERSIST_DIR: /app/data/chroma
     ports:
       - "18000:8000"
     volumes:
-      - ./ai_system/data:/app/data
+      - ai_system_data:/app/data
+
+volumes:
+  backend_data:
+  ai_system_data:
