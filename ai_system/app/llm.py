@@ -75,7 +75,7 @@ def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -
         )
 
     client = Groq(api_key=api_key)
-    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
     messages = []
     if system_prompt:
