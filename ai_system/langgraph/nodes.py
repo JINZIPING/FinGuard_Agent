@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import perf_counter
 
 from ai_system.app.agents import (
@@ -259,6 +260,55 @@ def run_quick_recommendation(state: PortfolioAnalysisState) -> PortfolioAnalysis
         duration_ms=_elapsed_ms(start),
     )
     return state
+
+
+@traceable(name="langgraph_run_full_crews_parallel", run_type="chain")
+def run_full_crews_parallel(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
+    """Run all three crews in parallel to reduce rate limit pressure."""
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(_run_crew_one_internal, state): "crew1",
+            executor.submit(_run_crew_two_internal, state): "crew2",
+            executor.submit(_run_crew_three_internal, state): "crew3",
+        }
+
+        for future in as_completed(futures):
+            crew_name = futures[future]
+            try:
+                result_state = future.result()
+                if crew_name == "crew1":
+                    state["crew1_output"] = result_state.get("crew1_output")
+                    if "rate_limited" in result_state:
+                        state["rate_limited"] = result_state["rate_limited"]
+                elif crew_name == "crew2":
+                    state["crew2_output"] = result_state.get("crew2_output")
+                    if "rate_limited" in result_state:
+                        state["rate_limited"] = result_state["rate_limited"]
+                elif crew_name == "crew3":
+                    state["crew3_output"] = result_state.get("crew3_output")
+                    if "rate_limited" in result_state:
+                        state["rate_limited"] = result_state["rate_limited"]
+                state["analysis_trace"].extend(result_state.get("analysis_trace", []))
+            except Exception as exc:
+                state["errors"].append(f"{crew_name} failed: {_truncate_error(exc)}")
+
+    state["crews_run"] = 3
+    return state
+
+
+def _run_crew_one_internal(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
+    """Internal helper to run crew one."""
+    return run_full_crew_one(state.copy() if hasattr(state, 'copy') else dict(state))
+
+
+def _run_crew_two_internal(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
+    """Internal helper to run crew two."""
+    return run_full_crew_two(state.copy() if hasattr(state, 'copy') else dict(state))
+
+
+def _run_crew_three_internal(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
+    """Internal helper to run crew three."""
+    return run_full_crew_three(state.copy() if hasattr(state, 'copy') else dict(state))
 
 
 @traceable(name="langgraph_crew_1_risk_analysis", run_type="chain")
