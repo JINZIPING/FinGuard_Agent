@@ -71,29 +71,23 @@ def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -
     client = OpenAI(api_key=api_key)
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     reasoning_effort = os.getenv("OPENAI_REASONING_EFFORT", "medium")
-    instructions = system_prompt or ""
-    input_items = []
-    if system_prompt:
-        instructions = system_prompt
-    input_items.append({"role": "user", "content": message})
 
-    # o-series models (o1, o3, o4, …) support extended reasoning;
-    # standard GPT models do not — only pass the parameter for o-series.
-    is_o_series = model.startswith("o") and model[1:2].isdigit()
+    messages = [{"role": "user", "content": message}]
 
     for attempt in range(max_retries):
         try:
             create_kwargs: dict = {
                 "model": model,
-                "input": input_items,
-                "max_output_tokens": 2048,
+                "messages": messages,
+                "max_tokens": 2048,
             }
-            if instructions:
-                create_kwargs["instructions"] = instructions
-            if is_o_series:
-                create_kwargs["reasoning"] = {"effort": reasoning_effort}
-            response = client.responses.create(**create_kwargs)
-            return response.output_text
+            if system_prompt:
+                create_kwargs["system"] = system_prompt
+            # o-series models (o1, o3, o4, …) support reasoning; gpt-4o-mini does not
+            if model.startswith("o") and model[1:2].isdigit():
+                create_kwargs["reasoning"] = {"type": "enabled", "budget_tokens": 1000}
+            response = client.chat.completions.create(**create_kwargs)
+            return response.choices[0].message.content
         except Exception as exc:
             if is_rate_limit_error(exc) and attempt < max_retries - 1:
                 time.sleep(2**attempt)
