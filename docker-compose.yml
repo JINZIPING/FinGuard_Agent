@@ -54,6 +54,11 @@ services:
         required: false
     environment:
       CHROMA_PERSIST_DIR: /app/data/chroma
+      OPENAI_MODEL: gpt-5.4-mini
+      OPENAI_REASONING_EFFORT: medium
+      LANGSMITH_TRACING: "false"
+      LANGSMITH_ENDPOINT: https://api.smith.langchain.com
+      LANGSMITH_PROJECT: finguard
     ports:
       - "18000:8000"
     volumes:
