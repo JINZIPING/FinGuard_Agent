@@ -75,7 +75,7 @@ def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -
         )
 
     client = Groq(api_key=api_key)
-    model = os.getenv("GROQ_MODEL", "llama-3-70b-8192")
+    model = os.getenv("GROQ_MODEL", "mixtral-8x7b-32768")
 
     messages = []
     if system_prompt:
