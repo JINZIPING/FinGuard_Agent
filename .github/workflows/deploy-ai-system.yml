@@ -48,7 +48,6 @@ jobs:
             --image ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             --set-env-vars \
               "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" \
-              "GROQ_MODEL=mixtral-8x7b-32768" \
               "CHROMA_PERSIST_DIR=/app/data/chroma"
 
       - name: Azure logout
