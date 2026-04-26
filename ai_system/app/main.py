@@ -229,8 +229,13 @@ def search_knowledge_base(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     rate_limited = False
+    thinking = ""
     try:
         response = chat(prompt)
+        think_match = re.search(r"<think>(.*?)</think>", response, flags=re.DOTALL)
+        if think_match:
+            thinking = think_match.group(1).strip()
+        response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
     except Exception as exc:
         if is_rate_limit_error(exc):
             response = "⚠️ AI search is temporarily rate-limited. Please wait 30–60 seconds and try again."
@@ -238,7 +243,7 @@ def search_knowledge_base(payload: dict[str, Any]) -> dict[str, Any]:
         else:
             response = f"AI search unavailable: {str(exc)[:300]}"
 
-    return {
+    result = {
         "agent": "KnowledgeSearch",
         "query": query,
         "response": response,
@@ -246,3 +251,6 @@ def search_knowledge_base(payload: dict[str, Any]) -> dict[str, Any]:
         "rate_limited": rate_limited,
         "timestamp": ts,
     }
+    if thinking:
+        result["thinking"] = thinking
+    return result
