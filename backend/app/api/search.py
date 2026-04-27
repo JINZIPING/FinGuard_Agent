@@ -143,3 +143,26 @@ def search_market(
         "context_count": llm.get("context_count", len(results)),
         "timestamp": llm.get("timestamp"),
     }
+
+
+@router.post("/api/search/knowledge")
+def search_knowledge_base(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """General-purpose LLM knowledge search used by the chatbot."""
+    payload = payload or {}
+    query = str(payload.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query required")
+
+    blocked = _run_guardrail(query)
+    if blocked:
+        return blocked  # type: ignore[return-value]
+
+    llm = _llm_search(query, [])
+    return {
+        "agent_response": llm.get("agent_response") or llm.get("response") or "",
+        "thinking": llm.get("thinking") or "",
+        "context_count": llm.get("context_count", 0),
+        "timestamp": llm.get("timestamp"),
+    }
