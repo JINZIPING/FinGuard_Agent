@@ -11,7 +11,7 @@ from ai_system.app.agents import (
     risk_assessment_agent as risk,
 )
 from ai_system.app.analysis_utils import ml_score_transactions
-from ai_system.app.llm import is_rate_limit_error
+from ai_system.app.llm import get_last_thinking, is_rate_limit_error
 from ai_system.langgraph.state import PortfolioAnalysisState
 
 try:
@@ -27,6 +27,20 @@ except ImportError:  # pragma: no cover - tracing is optional at import time
 
 def _truncate_error(exc: Exception) -> str:
     return str(exc)[:200]
+
+
+def _emit_llm_thinking(state: PortfolioAnalysisState, node: str, agent_name: str) -> None:
+    thinking = get_last_thinking()
+    if thinking:
+        _append_trace(state, {
+            "type": "thinking",
+            "node": node,
+            "agent_name": agent_name,
+            "step": 1,
+            "analysis": "LLM Reasoning",
+            "details": thinking,
+            "status": "in_progress",
+        })
 
 
 def _elapsed_ms(start: float) -> int:
@@ -326,9 +340,11 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
             portfolio_data,
             {"volatility": "current market conditions"},
         )
+        _emit_llm_thinking(state, "run_full_crew_one", "Risk Assessment Agent")
         fraud_assessment = risk.detect_fraud_risk(
             transactions, portfolio_data, ml_scores
         )
+        _emit_llm_thinking(state, "run_full_crew_one", "Risk Detection Agent")
         compliance_result = _compliance_snapshot(transactions)
         state["crew1_output"] = (
             f"{risk_assessment['risk_analysis']}\n\n"
@@ -441,6 +457,7 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
 
     try:
         portfolio_analysis = portfolio.analyze_portfolio(portfolio_data)
+        _emit_llm_thinking(state, "run_full_crew_two", "Portfolio Analyst")
         market_result = _market_snapshot(symbols or fallback_symbols)
         customer_result = _customer_snapshot(portfolio_data, transactions)
         state["crew2_output"] = (
@@ -536,6 +553,7 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
             },
             "medium",
         )
+        _emit_llm_thinking(state, "run_full_crew_three", "Explanation Agent")
         alert_result = _alert_snapshot(state)
         escalation_result = _escalation_snapshot(state)
         state["crew3_output"] = (

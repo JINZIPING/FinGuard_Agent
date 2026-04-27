@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from ai_system.app.llm import chat, is_rate_limit_error
+from ai_system.app.llm import chat, get_last_thinking, is_rate_limit_error
 
 
 def analyze_sentiment(symbols: list[str], news_context: str | None = None) -> dict:
@@ -21,8 +21,10 @@ def analyze_sentiment(symbols: list[str], news_context: str | None = None) -> di
         "5. Long-term outlook (3-6 months)"
     )
     rate_limited = False
+    thinking = ""
     try:
         sentiment_analysis = chat(prompt)
+        thinking = get_last_thinking()
     except Exception as exc:
         if is_rate_limit_error(exc):
             rate_limited = True
@@ -32,13 +34,16 @@ def analyze_sentiment(symbols: list[str], news_context: str | None = None) -> di
             )
         else:
             sentiment_analysis = f"Sentiment analysis unavailable: {str(exc)[:200]}"
-    return {
+    result = {
         "agent": "MarketIntelligence",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "symbols": clean_symbols,
         "sentiment_analysis": sentiment_analysis,
         "rate_limited": rate_limited,
     }
+    if thinking:
+        result["thinking"] = thinking
+    return result
 
 
 def analyze_market_sentiment(symbols: list[str], news_context: str = "") -> dict:

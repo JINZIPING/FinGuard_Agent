@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 import time
+
+_thinking_store = threading.local()
+
+
+def get_last_thinking() -> str:
+    """Return and clear the thinking content captured from the last chat() call."""
+    thinking = getattr(_thinking_store, "thinking", "")
+    _thinking_store.thinking = ""
+    return thinking
 
 try:
     from groq import Groq
@@ -92,6 +102,8 @@ def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -
                 temperature=0.7,
             )
             raw = response.choices[0].message.content
+            match = re.search(r"<think>(.*?)</think>", raw, flags=re.DOTALL)
+            _thinking_store.thinking = match.group(1).strip() if match else ""
             return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
         except Exception as exc:
             if is_rate_limit_error(exc) and attempt < max_retries - 1:
