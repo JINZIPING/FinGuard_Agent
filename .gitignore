@@ -13,7 +13,8 @@ build/
 *.egg
 
 # ── ML model artifacts ──
-backend/ml/models/*.joblib
+# joblib models are committed so Docker builds include them
+# backend/ml/models/*.joblib
 
 # ── Database ──
 *.db
