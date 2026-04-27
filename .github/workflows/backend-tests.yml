@@ -4,6 +4,16 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      security_override:
+        description: "Allow dependency vulnerability scan failures for this manual run"
+        required: false
+        type: boolean
+        default: false
+      override_reason:
+        description: "Reason for override (required when security_override is true)"
+        required: false
+        type: string
 
 jobs:
   pytest:
@@ -26,10 +36,38 @@ jobs:
       - name: Install backend test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt pytest
+          pip install -r backend/requirements.txt pytest pytest-cov pip-audit
+
+      - name: Validate backend security override reason
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.security_override }}
+        run: |
+          if [ -z "${{ inputs.override_reason }}" ]; then
+            echo "override_reason is required when security_override=true"
+            exit 1
+          fi
+
+      - name: Record backend security override audit trail
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.security_override }}
+        run: |
+          echo "## Security Override Used" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Workflow: backend-tests" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Actor: ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Ref: ${{ github.ref }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Reason: ${{ inputs.override_reason }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run backend dependency vulnerability scan
+        continue-on-error: ${{ github.ref == 'refs/heads/develop' || github.base_ref == 'develop' || (github.event_name == 'workflow_dispatch' && inputs.security_override) }}
+        run: pip-audit -r backend/requirements.txt
 
       - name: Run backend tests
-        run: pytest backend/tests -q --junitxml=backend_test_results.xml
+        run: |
+          pytest backend/tests -q \
+            --junitxml=backend_test_results.xml \
+            --cov=backend/app \
+            --cov=backend/ml \
+            --cov-report=term-missing \
+            --cov-report=xml:backend_coverage.xml \
+            --cov-report=html:backend_htmlcov
 
       - name: Upload backend test report
         if: always()
@@ -37,3 +75,12 @@ jobs:
         with:
           name: backend-test-report
           path: backend_test_results.xml
+
+      - name: Upload backend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-report
+          path: |
+            backend_coverage.xml
+            backend_htmlcov
