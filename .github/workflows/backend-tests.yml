@@ -1,9 +1,9 @@
 name: Backend tests
 
 on:
+  push:
   pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   pytest:
@@ -29,4 +29,11 @@ jobs:
           pip install -r backend/requirements.txt pytest
 
       - name: Run backend tests
-        run: pytest backend/tests -q
+        run: pytest backend/tests -q --junitxml=backend_test_results.xml
+
+      - name: Upload backend test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-report
+          path: backend_test_results.xml

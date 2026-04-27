@@ -1,11 +1,61 @@
-"""Explanation logic aligned to the legacy prompts."""
+﻿"""Explanation logic aligned to the legacy prompts."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from ai_system.app.agent_output import build_structured_output, risk_severity
 from ai_system.app.analysis_utils import format_dict
 from ai_system.app.llm import chat
+
+
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _agent_contract(audience: str = "analyst") -> str:
+    return (
+        "Keep the response concise and action-oriented. Use these sections only:\n"
+        "Summary: 1-2 sentences.\n"
+        "Severity: low, medium, high, critical, or unknown.\n"
+        "Confidence: low, medium, or high.\n"
+        "Key factors: up to 3 bullets.\n"
+        "Recommended actions: up to 3 bullets.\n"
+        "Follow-up: up to 2 bullets.\n"
+        f"Audience: {audience}."
+    )
+
+
+def _summary_from_text(text: str, fallback: str) -> str:
+    clean = " ".join((text or fallback).split())
+    if len(clean) <= 240:
+        return clean
+    return clean[:237].rstrip() + "..."
+
+
+def _factor_items(factors: dict) -> list[str]:
+    return [f"{key}: {value}" for key, value in factors.items()]
+
+
+def _actions_for_score(score: float) -> list[str]:
+    if score >= 80:
+        return [
+            "Block or hold the transaction pending senior review.",
+            "Validate customer intent and counterparty details.",
+            "Open or update an escalation case with the risk rationale.",
+        ]
+    if score >= 55:
+        return [
+            "Hold for analyst review before closure.",
+            "Compare with recent customer activity and related alerts.",
+            "Escalate if similar activity repeats or corroborating flags appear.",
+        ]
+    if score >= 30:
+        return [
+            "Monitor the account for related activity.",
+            "Document the reviewed factors and decision rationale.",
+        ]
+    return ["Continue routine monitoring and retain the scoring rationale."]
 
 
 def invoke(portfolio: dict, transactions: list[dict], findings: list[str]) -> dict:
@@ -22,8 +72,17 @@ def invoke(portfolio: dict, transactions: list[dict], findings: list[str]) -> di
 
     return {
         "agent": "Explanation",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": _timestamp(),
         "summary": narrative,
+        "structured_output": build_structured_output(
+            summary=narrative,
+            severity=risk_severity(text=narrative),
+            confidence="medium",
+            key_factors=findings,
+            recommended_actions=["Review the findings and document the decision."],
+            follow_up=["Re-run analysis if new transactions or alerts appear."],
+            raw_text=narrative,
+        ),
     }
 
 
@@ -33,25 +92,29 @@ def explain_alert(alert: dict, audience: str = "customer") -> dict:
 Alert:
 {format_dict(alert)}
 
-Provide explanation that:
-1. Is clear and accessible
-2. Avoids unnecessary jargon (adjust for audience)
-3. Explains why this matters
-4. Lists recommended actions
-5. Provides reassurance where appropriate
-6. Includes relevant context
+{_agent_contract(audience)}
 
-Tone: {'conversational' if audience == 'customer' else 'professional'}
-Detail level: {'simplified' if audience == 'customer' else 'comprehensive'}
-
-Return well-structured explanation."""
+Explain why the alert matters without overstating certainty. Avoid unnecessary jargon."""
     result = chat(prompt)
+    explanation = result or "Alert explanation unavailable."
     return {
         "agent": "Explanation",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": _timestamp(),
         "alert_id": alert.get("id"),
         "audience": audience,
-        "explanation": result or "Alert explanation unavailable.",
+        "explanation": explanation,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(explanation, "Alert explanation unavailable."),
+            severity=risk_severity(text=explanation),
+            confidence="medium",
+            key_factors=[
+                "Alert source: " + str(alert.get("source") or alert.get("type") or "unknown"),
+                "Alert id: " + str(alert.get("id") or "not provided"),
+            ],
+            recommended_actions=["Review the alert context and document the disposition."],
+            follow_up=["Escalate if the alert aligns with other recent risk signals."],
+            raw_text=explanation,
+        ),
     }
 
 
@@ -64,22 +127,32 @@ Recommendation:
 Customer Profile:
 {format_dict(customer_profile)}
 
-Explain:
-1. Why this recommendation was made
-2. How it addresses customer goals
-3. Risk implications
-4. Expected outcomes
-5. Alternatives considered and why not recommended
-6. Next steps
+{_agent_contract("analyst")}
 
-Return detailed but accessible explanation."""
+Explain suitability, risk implications, and next steps. Avoid investment certainty."""
     result = chat(prompt)
+    explanation = result or "Recommendation explanation unavailable."
     return {
         "agent": "Explanation",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": _timestamp(),
         "recommendation_id": recommendation.get("id"),
         "explained": True,
-        "explanation": result or "Recommendation explanation unavailable.",
+        "explanation": explanation,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(
+                explanation, "Recommendation explanation unavailable."
+            ),
+            severity=risk_severity(text=explanation),
+            confidence="medium",
+            key_factors=[
+                "Recommendation type: "
+                + str(recommendation.get("action") or recommendation.get("type") or "unknown"),
+                "Customer profile supplied: " + ("yes" if customer_profile else "no"),
+            ],
+            recommended_actions=["Confirm suitability against the customer profile."],
+            follow_up=["Document alternatives considered before acting."],
+            raw_text=explanation,
+        ),
     }
 
 
@@ -94,22 +167,27 @@ Risk Score: {score}/100
 Contributing Factors:
 {format_dict(factors)}
 
-Explain:
-1. What the score means
-2. Which factors drove the score
-3. Any concerning patterns
-4. Context (is this unusual for this customer?)
-5. What can be done about it
-6. When it might be reviewed
+{_agent_contract("analyst")}
 
-Return clear, non-alarming explanation."""
+Explain what the score means, which factors drove it, and what should happen next."""
     result = chat(prompt)
+    explanation = result or "Risk score explanation unavailable."
+    severity = risk_severity(score)
     return {
         "transaction_id": transaction.get("id"),
         "score_explained": score,
-        "explanation": result,
+        "explanation": explanation,
         "agent": "Explanation",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": _timestamp(),
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(explanation, "Risk score explanation unavailable."),
+            severity=severity,
+            confidence="high" if factors else "medium",
+            key_factors=_factor_items(factors),
+            recommended_actions=_actions_for_score(score),
+            follow_up=["Reassess if new related activity appears."],
+            raw_text=explanation,
+        ),
     }
 
 
@@ -122,22 +200,31 @@ Portfolio:
 Performance:
 {format_dict(performance)}
 
-Explain:
-1. Overall performance summary
-2. Which holdings performed well/poorly
-3. Why performance occurred (market factors)
-4. Comparison to relevant benchmarks
-5. Forward outlook
-6. Any adjustments needed
+{_agent_contract("customer")}
 
-Balance honesty with reassurance when appropriate."""
+Explain overall performance, important drivers, and practical next steps."""
     result = chat(prompt)
+    explanation = result or "Portfolio performance explanation unavailable."
     return {
         "agent": "Explanation",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": _timestamp(),
         "portfolio_id": portfolio.get("id"),
         "explained": True,
-        "explanation": result or "Portfolio performance explanation unavailable.",
+        "explanation": explanation,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(
+                explanation, "Portfolio performance explanation unavailable."
+            ),
+            severity=risk_severity(text=explanation),
+            confidence="medium",
+            key_factors=[
+                "Portfolio: " + str(portfolio.get("name") or portfolio.get("id") or "unknown"),
+                "Performance data supplied: " + ("yes" if performance else "no"),
+            ],
+            recommended_actions=["Review allocation, liquidity, and concentration drivers."],
+            follow_up=["Revisit the explanation after updated performance data is available."],
+            raw_text=explanation,
+        ),
     }
 
 
@@ -150,22 +237,31 @@ Finding:
 Customer Context:
 {format_dict(customer_context)}
 
-Explain:
-1. What the issue is
-2. Why it matters
-3. What needs to happen next
-4. Timeline for resolution
-5. What the customer needs to do (if anything)
-6. Reassurance appropriately
+{_agent_contract("customer")}
 
-Tone: Professional but not threatening."""
+Explain the issue, why it matters, what happens next, and what the customer needs to do."""
     result = chat(prompt)
+    explanation = result or "Compliance finding explanation unavailable."
     return {
         "agent": "Explanation",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": _timestamp(),
         "finding_id": finding.get("id"),
         "explained": True,
-        "explanation": result or "Compliance finding explanation unavailable.",
+        "explanation": explanation,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(
+                explanation, "Compliance finding explanation unavailable."
+            ),
+            severity=risk_severity(text=explanation),
+            confidence="medium",
+            key_factors=[
+                "Finding id: " + str(finding.get("id") or "not provided"),
+                "Customer context supplied: " + ("yes" if customer_context else "no"),
+            ],
+            recommended_actions=["Resolve the compliance finding through the documented workflow."],
+            follow_up=["Escalate if regulatory or customer-impact concerns remain unresolved."],
+            raw_text=explanation,
+        ),
     }
 
 
@@ -176,31 +272,24 @@ def explain_transaction_risk(transaction: dict, score: float, factors: dict) -> 
             "insights": result.get("explanation", ""),
             "agent": "Explanation",
             "timestamp": result.get(
-                "timestamp", datetime.now(timezone.utc).isoformat()
+                "timestamp", _timestamp()
             ),
             "success": True,
+            "structured_output": result.get("structured_output"),
         }
     except Exception as exc:
         error_msg = str(exc)
 
-    risk_level = (
-        "CRITICAL"
-        if score >= 80
-        else "HIGH"
-        if score >= 55
-        else "MEDIUM"
-        if score >= 30
-        else "LOW"
-    )
+    severity = risk_severity(score)
     fallback_insights = (
         f"**Risk Assessment Summary**\n"
         f"Risk Score: {score}/100\n"
-        f"Risk Level: {risk_level}\n\n"
+        f"Risk Level: {severity.upper()}\n\n"
         f"**Contributing Factors**\n"
     )
     for key, value in factors.items():
         fallback_insights += f"- {key}: {value}\n"
-    fallback_insights += f"\n**Analysis**\nThe combination of these factors indicates {risk_level.lower()} risk. "
+    fallback_insights += f"\n**Analysis**\nThe combination of these factors indicates {severity} risk. "
     if score >= 80:
         fallback_insights += (
             "Immediate action is recommended:\n"
@@ -217,13 +306,21 @@ def explain_transaction_risk(transaction: dict, score: float, factors: dict) -> 
         )
     else:
         fallback_insights += "Continue routine monitoring."
-    fallback_insights += f"\n\n**Error Details**\n{error_msg}"
     return {
         "insights": fallback_insights,
         "agent": "Explanation",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": _timestamp(),
         "success": False,
         "error_reason": error_msg,
+        "structured_output": build_structured_output(
+            summary=f"Transaction risk explanation fell back to deterministic guidance for a {severity} risk score.",
+            severity=severity,
+            confidence="medium",
+            key_factors=_factor_items(factors),
+            recommended_actions=_actions_for_score(score),
+            follow_up=["Retry LLM explanation later if a narrative note is still needed."],
+            raw_text=fallback_insights,
+        ),
     }
 
 
@@ -233,20 +330,25 @@ def summarize_analysis(analysis_results: dict, detail_level: str = "medium") -> 
 Analysis Results:
 {format_dict(analysis_results)}
 
-Provide:
-1. Executive summary (2-3 sentences)
-2. Key findings (bullet points)
-3. Implications
-4. Recommended actions
-5. Follow-up items
+{_agent_contract("analyst")}
 
-Detail level: {detail_level}"""
+Detail level: {detail_level}. Prioritize operational next steps over long narrative."""
     result = chat(prompt)
+    summary = result or "Summary unavailable."
     return {
         "agent": "Explanation",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "summary": result or "Summary unavailable.",
+        "timestamp": _timestamp(),
+        "summary": summary,
         "detail_level": detail_level,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(summary, "Summary unavailable."),
+            severity=risk_severity(text=summary),
+            confidence="medium",
+            key_factors=["Crew analysis results were reviewed."],
+            recommended_actions=["Review the summarized findings and assign ownership."],
+            follow_up=["Monitor for repeated risk indicators in future runs."],
+            raw_text=summary,
+        ),
     }
 
 
@@ -270,3 +372,4 @@ class ExplanationAgent:
 
     def summarize_analysis(self, analysis_results: dict, detail_level: str = "medium") -> dict:
         return summarize_analysis(analysis_results, detail_level)
+

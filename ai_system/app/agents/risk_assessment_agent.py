@@ -1,4 +1,4 @@
-"""Risk logic aligned to the legacy hybrid scoring and recommendation flow."""
+﻿"""Risk logic aligned to the legacy hybrid scoring and recommendation flow."""
 
 from __future__ import annotations
 
@@ -6,16 +6,91 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from ai_system.app.agent_output import build_structured_output, risk_severity
 from ai_system.app.analysis_utils import ml_score_transactions
 from ai_system.app.llm import chat, is_rate_limit_error
 from ai_system.app.ml import get_risk_engine
 
 
-def _format_money(value: Any) -> str:
-    try:
-        return f"${float(value):,.2f}"
-    except (TypeError, ValueError):
-        return "N/A"
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _risk_contract(audience: str = "analyst") -> str:
+    return (
+        "Keep the response concise and action-oriented. Use these sections only:\n"
+        "Summary: 1-2 sentences.\n"
+        "Severity: low, medium, high, critical, or unknown.\n"
+        "Confidence: low, medium, or high.\n"
+        "Key factors: up to 3 bullets.\n"
+        "Recommended actions: up to 3 bullets.\n"
+        "Follow-up: up to 2 bullets.\n"
+        f"Audience: {audience}."
+    )
+
+
+def _summary_from_text(text: str, fallback: str) -> str:
+    clean = " ".join((text or fallback).split())
+    if len(clean) <= 240:
+        return clean
+    return clean[:237].rstrip() + "..."
+
+
+def _severity_from_scores(scores: list[dict[str, Any]] | None, text: str = "") -> str:
+    max_score = None
+    for item in scores or []:
+        value = item.get("final_score", item.get("risk_score"))
+        if isinstance(value, (int, float)):
+            max_score = value if max_score is None else max(max_score, value)
+    return (
+        risk_severity(max_score, text)
+        if max_score is not None
+        else risk_severity(text=text)
+    )
+
+
+def _actions_for_severity(severity: str) -> list[str]:
+    if severity == "critical":
+        return [
+            "Hold or block the highest-risk activity pending senior review.",
+            "Validate customer intent, counterparties, and related alerts.",
+            "Open or update an escalation case with supporting evidence.",
+        ]
+    if severity == "high":
+        return [
+            "Queue for analyst review before closure.",
+            "Compare flagged activity with recent customer and portfolio behavior.",
+            "Escalate if similar indicators recur.",
+        ]
+    if severity == "medium":
+        return [
+            "Document the reviewed risk factors.",
+            "Monitor for repeated transaction or allocation signals.",
+        ]
+    return ["Continue routine monitoring and retain the analysis rationale."]
+
+
+def _score_factors(scores: list[dict[str, Any]] | None) -> list[str]:
+    factors: list[str] = []
+    labels: dict[str, int] = {}
+    flags: dict[str, int] = {}
+    for item in scores or []:
+        label = str(item.get("risk_label") or "unknown")
+        labels[label] = labels.get(label, 0) + 1
+        for flag in item.get("flags", []) or []:
+            flags[str(flag)] = flags.get(str(flag), 0) + 1
+    if labels:
+        factors.append(
+            "Risk labels: "
+            + ", ".join(f"{label}={count}" for label, count in sorted(labels.items()))
+        )
+    if flags:
+        top_flags = sorted(flags.items(), key=lambda item: (-item[1], item[0]))[:3]
+        factors.append(
+            "Top flags: "
+            + ", ".join(f"{flag} ({count})" for flag, count in top_flags)
+        )
+    return factors
 
 
 def _score_transaction_risk(
@@ -81,7 +156,7 @@ Provide a concise, actionable explanation of why this transaction may or
 may not be risky, and recommend next steps.
 
 Transaction Summary:
-  Amount:             {_format_money(txn.get("amount"))}
+  Amount:             ${txn.get("amount", "N/A"):,.2f}
   Type:               {txn.get("transaction_type", "N/A")}
   Sender Country:     {txn.get("sender_country", "N/A")}
   Receiver Country:   {txn.get("receiver_country", "N/A")}
@@ -96,10 +171,9 @@ Automated Scoring:
   ML Risk Label:      {hybrid_result["ml_details"].get("ml_risk_label", "N/A")}
   ML Fraud Flag:      {hybrid_result["ml_details"].get("ml_fraud_flag", "N/A")}
 
-Provide:
-1. Plain-language risk explanation (2-3 sentences)
-2. Recommended action: APPROVE / HOLD_FOR_REVIEW / ESCALATE / BLOCK
-3. Key factors driving the score"""
+{_risk_contract("analyst")}
+
+Recommended action must be one of: APPROVE, HOLD_FOR_REVIEW, ESCALATE, BLOCK."""
     return chat(prompt)
 
 
@@ -112,15 +186,9 @@ Transaction:
 Customer Profile:
 {json.dumps(customer_profile, indent=2)}
 
-Evaluate:
-1. Deviation from customer norm
-2. Fraud indicators
-3. AML/KYC concerns
-4. Regulatory red flags
-5. Risk score (1-100)
-6. Action recommendations
+{_risk_contract("analyst")}
 
-Return risk score and required actions."""
+Estimate risk score from 1-100 and include the recommended action."""
     result = chat(prompt)
     return {
         "agent": "RiskAssessment",
@@ -214,30 +282,6 @@ def score_transaction_risk(
 
 
 def assess_portfolio_risk(portfolio_data: dict, market_conditions: dict) -> dict:
-    # Step 1: Analyze market exposure
-    step1_prompt = """Analyze the market risk exposure of this portfolio:
-- Calculate beta and volatility
-- Identify correlation risks
-- Assess market timing risks
-
-Portfolio:
-""" + json.dumps(portfolio_data, indent=2)
-    
-    step1_result = chat(step1_prompt)
-    
-    # Step 2: Analyze concentration risk
-    step2_prompt = """Identify concentration risks in this portfolio:
-- Sector concentration
-- Single stock exposure
-- Geographic concentration
-- Asset class concentration
-
-Portfolio:
-""" + json.dumps(portfolio_data, indent=2)
-    
-    step2_result = chat(step2_prompt)
-    
-    # Step 3: Comprehensive assessment
     prompt = f"""You are a risk assessment expert. Perform comprehensive portfolio risk assessment:
 
 Portfolio:
@@ -246,32 +290,31 @@ Portfolio:
 Market Conditions:
 {json.dumps(market_conditions, indent=2)}
 
-Previous analysis findings:
-Market Risk Assessment: {step1_result}
-Concentration Risk Assessment: {step2_result}
+{_risk_contract("analyst")}
 
-Now provide:
-1. Liquidity risk assessment
-2. Counterparty risk analysis
-3. Currency risk (if applicable)
-4. Interest rate risk exposure
-5. Overall portfolio risk score (0-100)
-6. Key Risk Drivers
-7. Actionable Recommendations
-
-Return detailed risk breakdown with specific insights and recommendations."""
+Focus on concentration, liquidity, market sensitivity, and practical mitigations."""
     result = chat(prompt)
+    risk_analysis = result or "Risk assessment unavailable."
+    severity = risk_severity(text=risk_analysis)
     return {
         "agent": "RiskAssessment",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "assessment_type": "portfolio",
-        "thinking_steps": [
-            {"step": 1, "analysis": "Market Risk Analysis", "details": step1_result[:500]},
-            {"step": 2, "analysis": "Concentration Risk Analysis", "details": step2_result[:500]},
-            {"step": 3, "analysis": "Comprehensive Assessment", "details": result[:500]},
-        ],
-        "risk_analysis": f"**Market Risk Analysis:**\n{step1_result}\n\n**Concentration Risk Analysis:**\n{step2_result}\n\n**Comprehensive Assessment:**\n{result}",
+        "risk_analysis": risk_analysis,
         "complete": True,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(risk_analysis, "Risk assessment unavailable."),
+            severity=severity,
+            confidence="medium",
+            key_factors=[
+                f"Assets reviewed: {len(portfolio_data.get('assets', []))}",
+                f"Total value: {portfolio_data.get('total_value', 'unknown')}",
+                f"Market context supplied: {'yes' if market_conditions else 'no'}",
+            ],
+            recommended_actions=_actions_for_severity(severity),
+            follow_up=["Reassess after major allocation or market-condition changes."],
+            raw_text=risk_analysis,
+        ),
     }
 
 
@@ -281,100 +324,64 @@ def detect_fraud_risk(
     ml_pre_scores: list[dict[str, Any]] | None = None,
 ) -> dict:
     ml_summary_lines: list[str] = []
-    high_risk_txns = []
-    
     if ml_pre_scores:
         for index, result in enumerate(ml_pre_scores):
-            score = result.get('final_score', result.get('risk_score', 0))
-            label = result.get('risk_label', '?')
             ml_summary_lines.append(
-                f"  Txn {index + 1}: score={score}/100 "
-                f"label={label} "
+                f"  Txn {index + 1}: score={result.get('final_score', result.get('risk_score', '?'))}/100 "
+                f"label={result.get('risk_label', '?')} "
                 f"flags=[{', '.join(result.get('flags', []))}]"
             )
-            if score and score >= 55:
-                high_risk_txns.append((index, score, label))
     else:
         engine = get_risk_engine()
         if engine:
             for index, txn in enumerate(transaction_history[:20]):
                 try:
                     result = engine.score(txn)
-                    score = result['final_score']
-                    label = result['risk_label']
                     ml_summary_lines.append(
-                        f"  Txn {index + 1}: score={score}/100 "
-                        f"label={label} method={result['method']} "
+                        f"  Txn {index + 1}: score={result['final_score']}/100 "
+                        f"label={result['risk_label']} method={result['method']} "
                         f"flags=[{', '.join(result['flags'])}]"
                     )
-                    if score >= 55:
-                        high_risk_txns.append((index, score, label))
                 except Exception:
                     ml_summary_lines.append(f"  Txn {index + 1}: ML scoring failed")
 
     ml_section = ""
     if ml_summary_lines:
         ml_section = (
-            "\n\n── ML Pre-Screening Results (Rules + GradientBoosting + IsolationForest) ──\n"
+            "\n\n-- ML Pre-Screening Results (Rules + GradientBoosting + IsolationForest) --\n"
             + "\n".join(ml_summary_lines)
             + "\n\nUse these ML scores as your baseline. Add expert analysis on top."
         )
-    
-    # Step 1: Analyze high-risk transactions
-    step1_result = ""
-    if high_risk_txns:
-        hrt_list = ", ".join([f"Txn {idx+1} (score: {score}/100, {label})" for idx, score, label in high_risk_txns])
-        step1_prompt = f"""Analyze these high-risk transactions for fraud indicators:
-{hrt_list}
 
-Transactions:
-{json.dumps([transaction_history[i] for i, _, _ in high_risk_txns[:5]], indent=2)}
-
-Identify specific fraud patterns, velocity concerns, and behavioral anomalies."""
-        step1_result = chat(step1_prompt)
-    
-    # Step 2: Portfolio-level analysis
-    step2_prompt = f"""Perform portfolio-level fraud risk assessment:
-
-Portfolio Data:
-{json.dumps(portfolio_data, indent=2)}
-
-Assess for:
-- Unusual account activity patterns
-- Geographic inconsistencies
-- Account takeover signs
-- Layering/structuring patterns
-- Potential money laundering"""
-    
-    step2_result = chat(step2_prompt)
-    
-    # Step 3: Comprehensive assessment
     prompt = (
-        "You are a financial fraud detection expert. Provide comprehensive fraud risk assessment:\n\n"
+        "You are a financial fraud detection expert. Analyse these transactions "
+        "and portfolio for suspicious activity:\n\n"
         f"Transaction History:\n{json.dumps(transaction_history[:10], indent=2)}\n\n"
         f"Portfolio Data:\n{json.dumps(portfolio_data, indent=2)}"
         f"{ml_section}\n\n"
-        f"High-Risk Transaction Analysis:\n{step1_result}\n\n"
-        f"Portfolio-Level Analysis:\n{step2_result}\n\n"
-        "Provide:\n"
-        "1. Overall fraud risk assessment\n"
-        "2. Key risk drivers\n"
-        "3. Specific transaction alerts\n"
-        "4. Recommended SAR filing if warranted\n"
-        "5. Immediate action items"
+        f"{_risk_contract('analyst')}\n\n"
+        "Identify unusual transaction patterns, fraud indicators, specific alerts, "
+        "and recommended actions."
     )
     response = chat(prompt)
-    
+    assessment = response or "Fraud analysis unavailable."
+    severity = _severity_from_scores(ml_pre_scores, assessment)
+    key_factors = _score_factors(ml_pre_scores)
+    key_factors.append(f"Transactions reviewed: {len(transaction_history[:10])}")
     return {
         "agent": "RiskDetector",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "alert_type": "fraud_risk",
-        "thinking_steps": [
-            {"step": 1, "analysis": "High-Risk Transaction Analysis", "details": step1_result[:300]} if step1_result else None,
-            {"step": 2, "analysis": "Portfolio-Level Analysis", "details": step2_result[:300]},
-            {"step": 3, "analysis": "Comprehensive Assessment", "details": response[:300]},
-        ],
-        "assessment": f"**Transaction-Level Analysis:**\n{step1_result}\n\n**Portfolio Analysis:**\n{step2_result}\n\n**Comprehensive Assessment:**\n{response or 'Fraud analysis unavailable.'}",
+        "assessment": assessment,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(assessment, "Fraud analysis unavailable."),
+            severity=severity,
+            confidence="high" if ml_pre_scores else "medium",
+            key_factors=key_factors,
+            recommended_actions=_actions_for_severity(severity),
+            follow_up=["Compare future activity against the same fraud indicators."],
+            raw_text=assessment,
+        ),
     }
 
 
@@ -384,19 +391,31 @@ def assess_market_risk(portfolio_data: dict[str, Any], market_conditions: dict[s
         "market conditions:\n\n"
         f"Portfolio:\n{json.dumps(portfolio_data, indent=2)}\n\n"
         f"Market Conditions:\n{json.dumps(market_conditions, indent=2)}\n\n"
-        "Provide:\n"
-        "1. Market risk exposure assessment\n"
-        "2. Sector-specific risks\n"
-        "3. Systemic risk analysis\n"
-        "4. Hedging recommendations\n"
-        "5. Protective measures"
+        f"{_risk_contract('analyst')}\n\n"
+        "Assess market exposure, sector-specific risks, systemic risk, and protective measures."
     )
     response = chat(prompt)
+    assessment = response or "Market risk assessment unavailable."
+    severity = risk_severity(text=assessment)
     return {
         "agent": "RiskDetector",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "alert_type": "market_risk",
-        "assessment": response or "Market risk assessment unavailable.",
+        "assessment": assessment,
+        "structured_output": build_structured_output(
+            summary=_summary_from_text(
+                assessment, "Market risk assessment unavailable."
+            ),
+            severity=severity,
+            confidence="medium",
+            key_factors=[
+                f"Assets reviewed: {len(portfolio_data.get('assets', []))}",
+                f"Market fields supplied: {len(market_conditions)}",
+            ],
+            recommended_actions=_actions_for_severity(severity),
+            follow_up=["Refresh market assumptions before making trading decisions."],
+            raw_text=assessment,
+        ),
     }
 
 
@@ -483,32 +502,6 @@ Return prioritized hedging strategy."""
 def quick_portfolio_recommendation(
     portfolio_data: dict[str, Any], transactions: list[dict[str, Any]]
 ) -> dict:
-    assets = portfolio_data.get("assets", []) or []
-    asset_lines = []
-    for asset in assets[:8]:
-        symbol = asset.get("symbol") or "UNKNOWN"
-        name = asset.get("name") or symbol
-        quantity = asset.get("quantity", "N/A")
-        current_price = asset.get("current_price", "N/A")
-        asset_type = asset.get("asset_type") or "asset"
-        asset_lines.append(
-            f"- {symbol} ({name}), type={asset_type}, quantity={quantity}, current_price={current_price}"
-        )
-    holdings_summary = "\n".join(asset_lines) if asset_lines else "- No holdings supplied"
-
-    transaction_lines = []
-    for txn in transactions[:5]:
-        transaction_lines.append(
-            "- "
-            f"{txn.get('type', 'transaction')} "
-            f"{txn.get('quantity', 'N/A')} "
-            f"{txn.get('symbol', 'UNKNOWN')} "
-            f"at {txn.get('price', 'N/A')}"
-        )
-    transactions_summary = (
-        "\n".join(transaction_lines) if transaction_lines else "- No recent transactions supplied"
-    )
-
     portfolio_summary = (
         f"Portfolio '{portfolio_data.get('name')}': "
         f"${portfolio_data.get('total_value', 0):,.0f}, "
@@ -518,22 +511,16 @@ def quick_portfolio_recommendation(
 
     try:
         prompt = (
-            "You are reviewing a financial investment portfolio. "
-            "The portfolio name is only a user-defined label; do not infer asset type, technology stack, "
-            "database usage, or business activity from the name.\n\n"
-            "Write a quick risk assessment in 2-3 sentences based only on the holdings, recent transactions, "
-            "cash balance, total value, and ML pre-screening below.\n\n"
-            f"Portfolio label: {portfolio_data.get('name')}\n"
-            f"Total value: ${portfolio_data.get('total_value', 0):,.0f}\n"
-            f"Cash balance: ${portfolio_data.get('cash_balance', 0):,.0f}\n\n"
-            f"Holdings:\n{holdings_summary}\n\n"
-            f"Recent transactions:\n{transactions_summary}\n\n"
-            f"ML pre-screening:\n{ml_summary}\n\n"
-            "Return: key risks, whether any immediate action is needed, and one practical recommendation."
+            "Quick risk assessment for an analyst:\n"
+            f"{portfolio_summary}\n"
+            f"{ml_summary}\n\n"
+            f"{_risk_contract('analyst')}\n"
+            "Be direct about whether the portfolio needs routine monitoring, review, or escalation."
         )
         recommendation = chat(prompt)
+        severity = risk_severity(text=f"{recommendation}\n{ml_summary}")
         crew_output = (
-            "## ⚡ Quick Recommendation\n\n"
+            "## ? Quick Recommendation\n\n"
             f"**Portfolio:** {portfolio_summary}\n\n"
             f"### AI Risk Assessment\n{recommendation}\n\n"
             f"### ML Pre-Screening\n{ml_summary}\n\n"
@@ -545,14 +532,29 @@ def quick_portfolio_recommendation(
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "portfolio_id": portfolio_data.get("id"),
             "crew_output": crew_output,
+            "recommendation": recommendation,
             "agents_used": 1,
             "recommendation_type": "quick",
             "rate_limited": False,
+            "structured_output": build_structured_output(
+                summary=_summary_from_text(
+                    recommendation, "Quick recommendation unavailable."
+                ),
+                severity=severity,
+                confidence="medium",
+                key_factors=[
+                    portfolio_summary,
+                    "ML pre-screening supplied: " + ("yes" if ml_summary else "no"),
+                ],
+                recommended_actions=_actions_for_severity(severity),
+                follow_up=["Run full analysis before making high-impact decisions."],
+                raw_text=crew_output,
+            ),
         }
     except Exception as exc:
         if is_rate_limit_error(exc):
             fallback = (
-                "⚠️ **Rate Limit Reached**\n\n"
+                "?? **Rate Limit Reached**\n\n"
                 "Even the quick recommendation exceeded the rate limit.\n"
                 "Please wait 30-60 seconds and try again, or increase your model service quota.\n\n"
                 f"{ml_summary}"
@@ -564,15 +566,33 @@ def quick_portfolio_recommendation(
                 "agents_used": 0,
                 "recommendation_type": "quick",
                 "rate_limited": True,
+                "structured_output": build_structured_output(
+                    summary="Quick recommendation was rate limited; ML pre-screening remains available.",
+                    severity=risk_severity(text=ml_summary),
+                    confidence="low",
+                    key_factors=["LLM recommendation unavailable due to rate limiting."],
+                    recommended_actions=["Retry after the model service recovers."],
+                    follow_up=["Use full analysis once quota is available."],
+                    raw_text=fallback,
+                ),
             }
 
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "portfolio_id": portfolio_data.get("id"),
-            "crew_output": f"❌ Quick recommendation failed: {str(exc)[:200]}",
+            "crew_output": f"? Quick recommendation failed: {str(exc)[:200]}",
             "agents_used": 0,
             "recommendation_type": "quick",
             "error": str(exc),
+            "structured_output": build_structured_output(
+                summary="Quick recommendation failed before an analyst narrative could be generated.",
+                severity="unknown",
+                confidence="low",
+                key_factors=[str(exc)[:200]],
+                recommended_actions=["Retry the request or run deterministic transaction scoring."],
+                follow_up=["Check model configuration if the failure repeats."],
+                raw_text=str(exc),
+            ),
         }
 
 
@@ -605,12 +625,22 @@ def invoke(portfolio: dict, transactions: list[dict], mode: str = "quick") -> di
             "Quick risk screen did not detect any strong operational risk signal."
         )
 
+    severity = _severity_from_scores(scored)
     return {
         "agent": "risk",
         "mode": mode,
         "summary": " ".join(findings),
         "findings": findings,
         "scored_transactions": scored,
+        "structured_output": build_structured_output(
+            summary=" ".join(findings),
+            severity=severity,
+            confidence="high" if available_scores else "medium",
+            key_factors=_score_factors(scored) + findings,
+            recommended_actions=_actions_for_severity(severity),
+            follow_up=["Review scored transactions if new alerts or cases appear."],
+            raw_text=" ".join(findings),
+        ),
     }
 
 
@@ -646,3 +676,4 @@ class RiskDetectionAgent:
 
     def assess_market_risk(self, portfolio_data: dict[str, Any], market_conditions: dict[str, Any]) -> dict:
         return assess_market_risk(portfolio_data, market_conditions)
+
