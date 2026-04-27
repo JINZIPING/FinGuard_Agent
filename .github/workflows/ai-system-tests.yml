@@ -26,10 +26,16 @@ jobs:
       - name: Install AI system test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r ai_system/requirements.txt pytest
+          pip install -r ai_system/requirements.txt pytest pytest-cov
 
       - name: Run AI system tests
-        run: pytest ai_system/tests -q --junitxml=ai_system_test_results.xml
+        run: |
+          pytest ai_system/tests -q \
+            --junitxml=ai_system_test_results.xml \
+            --cov=ai_system/app \
+            --cov-report=term-missing \
+            --cov-report=xml:ai_system_coverage.xml \
+            --cov-report=html:ai_system_htmlcov
 
       - name: Upload AI system test report
         if: always()
@@ -37,3 +43,12 @@ jobs:
         with:
           name: ai-system-test-report
           path: ai_system_test_results.xml
+
+      - name: Upload AI system coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-system-coverage-report
+          path: |
+            ai_system_coverage.xml
+            ai_system_htmlcov

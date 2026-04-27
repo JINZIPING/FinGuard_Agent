@@ -28,10 +28,17 @@ jobs:
       - name: Install integration test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt -r ai_system/requirements.txt pytest
+          pip install -r backend/requirements.txt -r ai_system/requirements.txt pytest pytest-cov
 
       - name: Run integration tests
-        run: pytest integration_tests -q --junitxml=integration_test_results.xml
+        run: |
+          pytest integration_tests -q \
+            --junitxml=integration_test_results.xml \
+            --cov=backend/app \
+            --cov=ai_system/app \
+            --cov-report=term-missing \
+            --cov-report=xml:integration_coverage.xml \
+            --cov-report=html:integration_htmlcov
 
       - name: Upload integration test report
         if: always()
@@ -39,3 +46,12 @@ jobs:
         with:
           name: integration-test-report
           path: integration_test_results.xml
+
+      - name: Upload integration coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-coverage-report
+          path: |
+            integration_coverage.xml
+            integration_htmlcov
