@@ -1,4 +1,4 @@
-"""Groq LLM adapter with retry and error semantics."""
+"""LLM adapter with retry semantics and deterministic mock mode support."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import os
 import re
 import threading
 import time
+
+from ai_system.app.mock_responses import generate_mock_response
 
 _thinking_store = threading.local()
 
@@ -42,6 +44,15 @@ def is_rate_limit_error(error: Exception | str | None) -> bool:
     )
 
 
+def response_mode() -> str:
+    mode = str(os.getenv("AI_RESPONSE_MODE", "live")).strip().lower()
+    return mode if mode in {"live", "mock"} else "live"
+
+
+def is_mock_mode() -> bool:
+    return response_mode() == "mock"
+
+
 def _format_chat_error(error: Exception) -> str:
     error_type = type(error).__name__
     error_msg = str(error)
@@ -73,6 +84,10 @@ def _format_chat_error(error: Exception) -> str:
 
 @traceable(name="groq_chat", run_type="llm")
 def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -> str:
+    if is_mock_mode():
+        _thinking_store.thinking = ""
+        return generate_mock_response(message, system_prompt)
+
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError(
