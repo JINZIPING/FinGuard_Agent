@@ -2,7 +2,9 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
-ARG REACT_APP_API_BASE_URL=http://localhost:5000
+# Leave blank so App.js defaults to '/api', which Nginx proxies to the backend.
+# Override at build time only if you need a direct cross-origin backend URL.
+ARG REACT_APP_API_BASE_URL=
 ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
 
 COPY package*.json ./

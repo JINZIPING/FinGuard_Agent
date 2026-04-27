@@ -1,4 +1,4 @@
-"""OpenAI adapter with deterministic mock support for demos and tests."""
+"""Groq LLM adapter with deterministic mock support and retries."""
 
 from __future__ import annotations
 
@@ -8,9 +8,18 @@ import time
 from ai_system.app.mock_responses import generate_mock_response
 
 try:
-    from openai import OpenAI
-except ImportError:  # pragma: no cover - optional at import time
-    OpenAI = None
+    from groq import Groq
+except ImportError:  # pragma: no cover
+    Groq = None
+
+try:
+    from langsmith import traceable
+except ImportError:  # pragma: no cover
+
+    def traceable(*_: object, **__: object) -> object:
+        def decorator(func: object) -> object:
+            return func
+        return decorator
 
 
 def is_rate_limit_error(error: Exception | str | None) -> bool:
@@ -28,32 +37,28 @@ def _format_chat_error(error: Exception) -> str:
     error_type = type(error).__name__
     error_msg = str(error)
 
-    if (
-        "401" in error_msg
-        or "Unauthorized" in error_msg
-        or "invalid api key" in error_msg.lower()
-    ):
+    if "401" in error_msg or "Unauthorized" in error_msg or "invalid api key" in error_msg.lower():
         return (
-            "❌ LLM Authentication Failed: Invalid or expired OpenAI API key\n"
+            "❌ LLM Authentication Failed: Invalid or expired Groq API key\n"
             f"Details: {error_msg}\n"
-            "Fix: Update OPENAI_API_KEY with a valid key from https://platform.openai.com/api-keys"
+            "Fix: Get a key at https://console.groq.com and set GROQ_API_KEY"
         )
     if is_rate_limit_error(error_msg):
         return (
-            "⏳ LLM Rate Limited: Too many requests to OpenAI API (exceeded after retries)\n"
+            "⏳ LLM Rate Limited: Too many requests to Groq API\n"
             f"Details: {error_msg}\n"
-            "Fix: Wait and retry, or move to a higher OpenAI usage tier if needed."
+            "Fix: Wait 5-10 seconds and retry."
         )
     if "503" in error_msg or "Service unavailable" in error_msg:
         return (
-            "🚨 LLM Service Unavailable: OpenAI API is temporarily down\n"
+            "🚨 LLM Service Unavailable: Groq API is temporarily down\n"
             f"Details: {error_msg}\n"
-            "Fix: Check https://status.openai.com and retry in a moment"
+            "Fix: Check https://status.groq.com and retry in a moment"
         )
     return (
         f"❌ LLM Call Failed ({error_type}):\n"
         f"{error_msg}\n"
-        "Fix: Check API key, rate limits, model name, and OpenAI API status"
+        "Fix: Check GROQ_API_KEY, model name, and https://console.groq.com"
     )
 
 
@@ -66,44 +71,43 @@ def is_mock_mode() -> bool:
     return response_mode() == "mock"
 
 
+@traceable(name="groq_chat", run_type="llm")
 def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -> str:
     if is_mock_mode():
         return generate_mock_response(message, system_prompt)
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError(
-            "❌ LLM Configuration Error: OPENAI_API_KEY environment variable is not set.\n"
-            "Please set OPENAI_API_KEY before calling ai_system analysis endpoints."
+            "❌ LLM Configuration Error: GROQ_API_KEY is not set.\n"
+            "Get a free key at https://console.groq.com and set GROQ_API_KEY."
         )
-    if OpenAI is None:
+    if Groq is None:
         raise RuntimeError(
-            "❌ LLM Configuration Error: openai package is not installed.\n"
-            "Install ai_system dependencies before calling ai_system analysis endpoints."
+            "❌ LLM Configuration Error: groq package is not installed.\n"
+            "Run: pip install groq"
         )
 
-    client = OpenAI(api_key=api_key)
-    model = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
-    reasoning_effort = os.getenv("OPENAI_REASONING_EFFORT", "medium")
-    instructions = system_prompt or ""
-    input_items = []
+    client = Groq(api_key=api_key)
+    model = os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
+
+    messages = []
     if system_prompt:
-        instructions = system_prompt
-    input_items.append({"role": "user", "content": message})
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": message})
 
     for attempt in range(max_retries):
         try:
-            response = client.responses.create(
+            response = client.chat.completions.create(
                 model=model,
-                instructions=instructions or None,
-                input=input_items,
-                reasoning={"effort": reasoning_effort},
-                max_output_tokens=2048,
+                messages=messages,
+                max_tokens=2048,
+                temperature=0.7,
             )
-            return response.output_text
+            return response.choices[0].message.content
         except Exception as exc:
             if is_rate_limit_error(exc) and attempt < max_retries - 1:
-                time.sleep(2**attempt)
+                time.sleep(5 * (2 ** attempt))
                 continue
             raise RuntimeError(_format_chat_error(exc)) from exc
 

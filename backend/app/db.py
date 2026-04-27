@@ -1,8 +1,9 @@
-"""SQLite helpers for the FastAPI backend."""
+"""Database helpers for the FastAPI backend."""
 
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -10,7 +11,66 @@ from pathlib import Path
 from typing import Any
 
 
-Connection = sqlite3.Connection
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except ImportError:  # pragma: no cover - only needed when DATABASE_URL uses Postgres.
+    psycopg2 = None
+    RealDictCursor = None
+
+
+class Cursor:
+    def __init__(self, cursor: Any, *, lastrowid: int | None = None) -> None:
+        self._cursor = cursor
+        self.lastrowid = (
+            lastrowid if lastrowid is not None else getattr(cursor, "lastrowid", None)
+        )
+
+    def fetchone(self) -> Any:
+        return self._cursor.fetchone()
+
+    def fetchall(self) -> list[Any]:
+        return self._cursor.fetchall()
+
+
+class Connection:
+    def __init__(self, raw: Any, dialect: str) -> None:
+        self._raw = raw
+        self.dialect = dialect
+
+    def execute(self, query: str, params: tuple = ()) -> Cursor:
+        if self.dialect == "postgres":
+            return self._execute_postgres(query, params)
+        return Cursor(self._raw.execute(query, params))
+
+    def _execute_postgres(self, query: str, params: tuple = ()) -> Cursor:
+        translated = _translate_postgres_query(query)
+        returning_id = _is_insert_values_without_returning(translated)
+        if returning_id:
+            translated = f"{translated.rstrip()} RETURNING id"
+
+        cursor = self._raw.cursor()
+        cursor.execute(translated, params)
+
+        lastrowid = None
+        if returning_id:
+            row = cursor.fetchone()
+            if row is not None:
+                lastrowid = int(row["id"])
+        return Cursor(cursor, lastrowid=lastrowid)
+
+    def commit(self) -> None:
+        self._raw.commit()
+
+    def rollback(self) -> None:
+        self._raw.rollback()
+
+    def close(self) -> None:
+        self._raw.close()
+
+
+def _database_url() -> str | None:
+    return os.getenv("DATABASE_URL")
 
 
 def _db_path() -> Path:
@@ -23,10 +83,44 @@ def _db_path() -> Path:
 
 
 def _open_connection() -> Connection:
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
+    database_url = _database_url()
+    if database_url:
+        if psycopg2 is None or RealDictCursor is None:
+            raise RuntimeError(
+                "DATABASE_URL requires psycopg2. Install psycopg2-binary."
+            )
+        raw_conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
+        return Connection(raw_conn, "postgres")
+
+    raw_conn = sqlite3.connect(_db_path())
+    raw_conn.row_factory = sqlite3.Row
+    conn = Connection(raw_conn, "sqlite")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def _translate_postgres_query(query: str) -> str:
+    translated = query.replace("?", "%s")
+    translated = re.sub(
+        r"datetime\('now'\)",
+        "CURRENT_TIMESTAMP::text",
+        translated,
+        flags=re.IGNORECASE,
+    )
+    translated = translated.replace(
+        "INTEGER PRIMARY KEY AUTOINCREMENT",
+        "SERIAL PRIMARY KEY",
+    )
+    return translated
+
+
+def _is_insert_values_without_returning(query: str) -> bool:
+    normalized = query.strip()
+    return (
+        normalized.upper().startswith("INSERT ")
+        and re.search(r"\bVALUES\b", normalized, flags=re.IGNORECASE) is not None
+        and re.search(r"\bRETURNING\b", normalized, flags=re.IGNORECASE) is None
+    )
 
 
 @contextmanager
@@ -62,11 +156,34 @@ def run_in_transaction(work: Callable[[Connection], Any]) -> Any:
 
 
 def _table_columns(conn: Connection, table_name: str) -> set[str]:
+    if conn.dialect == "postgres":
+        rows = conn.execute(
+            """
+            SELECT column_name AS name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            """,
+            (table_name,),
+        ).fetchall()
+        return {str(row["name"]) for row in rows}
+
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return {str(row["name"]) for row in rows}
 
 
 def _table_info(conn: Connection, table_name: str) -> list[dict[str, Any]]:
+    if conn.dialect == "postgres":
+        rows = conn.execute(
+            """
+            SELECT column_name AS name,
+                   CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END AS notnull
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            """,
+            (table_name,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return [dict(row) for row in rows]
 
@@ -247,6 +364,9 @@ def _migrate_schema(conn: Connection) -> None:
 
 
 def _rebuild_cases_table_if_needed(conn: Connection) -> None:
+    if conn.dialect == "postgres":
+        return
+
     columns = {row["name"]: row for row in _table_info(conn, "cases")}
     portfolio_notnull = bool(columns.get("portfolio_id", {}).get("notnull"))
     transaction_notnull = bool(columns.get("transaction_id", {}).get("notnull"))

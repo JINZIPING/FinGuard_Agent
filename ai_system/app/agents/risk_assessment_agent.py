@@ -93,6 +93,13 @@ def _score_factors(scores: list[dict[str, Any]] | None) -> list[str]:
     return factors
 
 
+def _format_money(value: Any) -> str:
+    try:
+        return f"${float(value):,.2f}"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
 def _score_transaction_risk(
     transaction: dict, customer_profile: dict | None = None
 ) -> dict:
@@ -156,7 +163,7 @@ Provide a concise, actionable explanation of why this transaction may or
 may not be risky, and recommend next steps.
 
 Transaction Summary:
-  Amount:             ${txn.get("amount", "N/A"):,.2f}
+  Amount:             {_format_money(txn.get("amount"))}
   Type:               {txn.get("transaction_type", "N/A")}
   Sender Country:     {txn.get("sender_country", "N/A")}
   Receiver Country:   {txn.get("receiver_country", "N/A")}
@@ -282,6 +289,30 @@ def score_transaction_risk(
 
 
 def assess_portfolio_risk(portfolio_data: dict, market_conditions: dict) -> dict:
+    # Step 1: Analyze market exposure
+    step1_prompt = """Analyze the market risk exposure of this portfolio:
+- Calculate beta and volatility
+- Identify correlation risks
+- Assess market timing risks
+
+Portfolio:
+""" + json.dumps(portfolio_data, indent=2)
+    
+    step1_result = chat(step1_prompt)
+    
+    # Step 2: Analyze concentration risk
+    step2_prompt = """Identify concentration risks in this portfolio:
+- Sector concentration
+- Single stock exposure
+- Geographic concentration
+- Asset class concentration
+
+Portfolio:
+""" + json.dumps(portfolio_data, indent=2)
+    
+    step2_result = chat(step2_prompt)
+    
+    # Step 3: Comprehensive assessment
     prompt = f"""You are a risk assessment expert. Perform comprehensive portfolio risk assessment:
 
 Portfolio:
@@ -324,24 +355,34 @@ def detect_fraud_risk(
     ml_pre_scores: list[dict[str, Any]] | None = None,
 ) -> dict:
     ml_summary_lines: list[str] = []
+    high_risk_txns = []
+    
     if ml_pre_scores:
         for index, result in enumerate(ml_pre_scores):
+            score = result.get('final_score', result.get('risk_score', 0))
+            label = result.get('risk_label', '?')
             ml_summary_lines.append(
-                f"  Txn {index + 1}: score={result.get('final_score', result.get('risk_score', '?'))}/100 "
-                f"label={result.get('risk_label', '?')} "
+                f"  Txn {index + 1}: score={score}/100 "
+                f"label={label} "
                 f"flags=[{', '.join(result.get('flags', []))}]"
             )
+            if score and score >= 55:
+                high_risk_txns.append((index, score, label))
     else:
         engine = get_risk_engine()
         if engine:
             for index, txn in enumerate(transaction_history[:20]):
                 try:
                     result = engine.score(txn)
+                    score = result['final_score']
+                    label = result['risk_label']
                     ml_summary_lines.append(
-                        f"  Txn {index + 1}: score={result['final_score']}/100 "
-                        f"label={result['risk_label']} method={result['method']} "
+                        f"  Txn {index + 1}: score={score}/100 "
+                        f"label={label} method={result['method']} "
                         f"flags=[{', '.join(result['flags'])}]"
                     )
+                    if score >= 55:
+                        high_risk_txns.append((index, score, label))
                 except Exception:
                     ml_summary_lines.append(f"  Txn {index + 1}: ML scoring failed")
 
@@ -352,10 +393,38 @@ def detect_fraud_risk(
             + "\n".join(ml_summary_lines)
             + "\n\nUse these ML scores as your baseline. Add expert analysis on top."
         )
+    
+    # Step 1: Analyze high-risk transactions
+    step1_result = ""
+    if high_risk_txns:
+        hrt_list = ", ".join([f"Txn {idx+1} (score: {score}/100, {label})" for idx, score, label in high_risk_txns])
+        step1_prompt = f"""Analyze these high-risk transactions for fraud indicators:
+{hrt_list}
 
+Transactions:
+{json.dumps([transaction_history[i] for i, _, _ in high_risk_txns[:5]], indent=2)}
+
+Identify specific fraud patterns, velocity concerns, and behavioral anomalies."""
+        step1_result = chat(step1_prompt)
+    
+    # Step 2: Portfolio-level analysis
+    step2_prompt = f"""Perform portfolio-level fraud risk assessment:
+
+Portfolio Data:
+{json.dumps(portfolio_data, indent=2)}
+
+Assess for:
+- Unusual account activity patterns
+- Geographic inconsistencies
+- Account takeover signs
+- Layering/structuring patterns
+- Potential money laundering"""
+    
+    step2_result = chat(step2_prompt)
+    
+    # Step 3: Comprehensive assessment
     prompt = (
-        "You are a financial fraud detection expert. Analyse these transactions "
-        "and portfolio for suspicious activity:\n\n"
+        "You are a financial fraud detection expert. Provide comprehensive fraud risk assessment:\n\n"
         f"Transaction History:\n{json.dumps(transaction_history[:10], indent=2)}\n\n"
         f"Portfolio Data:\n{json.dumps(portfolio_data, indent=2)}"
         f"{ml_section}\n\n"
@@ -502,6 +571,32 @@ Return prioritized hedging strategy."""
 def quick_portfolio_recommendation(
     portfolio_data: dict[str, Any], transactions: list[dict[str, Any]]
 ) -> dict:
+    assets = portfolio_data.get("assets", []) or []
+    asset_lines = []
+    for asset in assets[:8]:
+        symbol = asset.get("symbol") or "UNKNOWN"
+        name = asset.get("name") or symbol
+        quantity = asset.get("quantity", "N/A")
+        current_price = asset.get("current_price", "N/A")
+        asset_type = asset.get("asset_type") or "asset"
+        asset_lines.append(
+            f"- {symbol} ({name}), type={asset_type}, quantity={quantity}, current_price={current_price}"
+        )
+    holdings_summary = "\n".join(asset_lines) if asset_lines else "- No holdings supplied"
+
+    transaction_lines = []
+    for txn in transactions[:5]:
+        transaction_lines.append(
+            "- "
+            f"{txn.get('type', 'transaction')} "
+            f"{txn.get('quantity', 'N/A')} "
+            f"{txn.get('symbol', 'UNKNOWN')} "
+            f"at {txn.get('price', 'N/A')}"
+        )
+    transactions_summary = (
+        "\n".join(transaction_lines) if transaction_lines else "- No recent transactions supplied"
+    )
+
     portfolio_summary = (
         f"Portfolio '{portfolio_data.get('name')}': "
         f"${portfolio_data.get('total_value', 0):,.0f}, "

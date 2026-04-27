@@ -1,6 +1,6 @@
 {
-  "trained_at": "2026-03-18T20:54:16.257969",
-  "data_source": "/Users/HariKrishnaD/Downloads/NUS/Architecting_AI_Systems/GC4_FinGuard_Agent/FinGuard_Agent/backend/ml/data/transaction_risk_training_data.csv",
+  "trained_at": "2026-04-26T11:06:07.860874",
+  "data_source": "/Users/HariKrishnaD/Downloads/GC_4_Project_Submission/FinGuard_Agent/backend/ml/data/transaction_risk_training_data.csv",
   "num_samples": 150,
   "feature_names": [
     "amount",

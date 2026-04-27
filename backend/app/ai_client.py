@@ -94,3 +94,13 @@ def request_transaction_insights(
             "factors": factors,
         },
     )
+
+
+def check_search_guardrail(query: str) -> dict:
+    """Returns {allowed, blocked, reason} from the LLM guardrail."""
+    return _post("/guardrail/check-query", {"query": query})
+
+
+def search_knowledge(query: str, context: list | None = None) -> dict:
+    """LLM-powered knowledge base search."""
+    return _post("/search/knowledge", {"query": query, "context": context or []})
