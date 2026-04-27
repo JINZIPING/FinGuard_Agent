@@ -19,10 +19,6 @@ router = APIRouter()
 
 
 def _run_guardrail(query: str) -> dict[str, Any] | None:
-    """
-    Returns a blocked-response dict if the query should be rejected, else None.
-    Swallows AI service errors so a guardrail outage never blocks legitimate searches.
-    """
     try:
         result = check_search_guardrail(query)
         if result.get("blocked"):
@@ -32,16 +28,45 @@ def _run_guardrail(query: str) -> dict[str, Any] | None:
                 "results": [],
             }
     except (AIServiceError, Exception):
-        pass  # fail open — don't block searches if guardrail is down
+        pass
     return None
 
 
 def _llm_search(query: str, context_docs: list[dict]) -> dict[str, Any]:
-    """Call the LLM knowledge-search endpoint and return its response."""
+    """Call the LLM knowledge-search endpoint. Never returns empty — always has agent_response."""
     try:
-        return search_knowledge(query, context_docs)
+        result = search_knowledge(query, context_docs)
+        # ai_system returns 'agent_response', normalise here
+        answer = result.get("agent_response") or result.get("response") or ""
+        return {**result, "agent_response": answer}
     except (AIServiceError, Exception):
-        return {}
+        pass
+
+    # Fallback: build a basic answer from the context docs themselves
+    if context_docs:
+        snippets = []
+        for doc in context_docs[:5]:
+            text = (doc.get("analysis") or doc.get("content") or
+                    doc.get("text") or doc.get("document") or "")
+            if text:
+                snippets.append(str(text)[:300])
+        if snippets:
+            return {
+                "agent_response": "**Based on available records:**\n\n" + "\n\n---\n\n".join(snippets),
+                "context_count": len(context_docs),
+                "timestamp": None,
+            }
+
+    # Last resort: return a helpful message rather than empty
+    return {
+        "agent_response": (
+            f"I searched for **\"{query}\"** but the AI service is currently unavailable. "
+            "The vector store and database were queried — please try again in a moment, "
+            "or run an AI Analysis first to populate the knowledge base."
+        ),
+        "context_count": 0,
+        "timestamp": None,
+    }
 
 
 @router.post("/api/search/analyses")
@@ -58,7 +83,6 @@ def search_analyses(
     if blocked:
         return blocked  # type: ignore[return-value]
 
-    # Vector store search
     results: list[dict[str, Any]] = []
     if vector_store is not None:
         try:
@@ -68,12 +92,12 @@ def search_analyses(
     if not results:
         results = search_analysis_records(query, portfolio_id=portfolio_id)
 
-    # LLM-powered answer (runs regardless of vector results)
     llm = _llm_search(query, results)
 
     return {
         "results": results,
-        "agent_response": llm.get("response") or "",
+        "agent_response": llm.get("agent_response") or "",
+        "thinking": llm.get("thinking") or "",
         "context_count": llm.get("context_count", len(results)),
         "timestamp": llm.get("timestamp"),
     }
@@ -106,7 +130,8 @@ def search_risks(
 
     return {
         "results": results,
-        "agent_response": llm.get("response") or "",
+        "agent_response": llm.get("agent_response") or "",
+        "thinking": llm.get("thinking") or "",
         "context_count": llm.get("context_count", len(results)),
         "timestamp": llm.get("timestamp"),
     }
@@ -139,7 +164,8 @@ def search_market(
 
     return {
         "results": results,
-        "agent_response": llm.get("response") or "",
+        "agent_response": llm.get("agent_response") or "",
+        "thinking": llm.get("thinking") or "",
         "context_count": llm.get("context_count", len(results)),
         "timestamp": llm.get("timestamp"),
     }
@@ -159,10 +185,15 @@ def search_knowledge_base(
     if blocked:
         return blocked  # type: ignore[return-value]
 
-    llm = _llm_search(query, [])
+    # Pull context from all record types to give the LLM something to work with
+    context: list[dict[str, Any]] = []
+    context.extend(search_analysis_records(query)[:3])
+    context.extend(search_risk_records(query)[:2])
+
+    llm = _llm_search(query, context)
     return {
-        "agent_response": llm.get("agent_response") or llm.get("response") or "",
+        "agent_response": llm.get("agent_response") or "",
         "thinking": llm.get("thinking") or "",
-        "context_count": llm.get("context_count", 0),
+        "context_count": llm.get("context_count", len(context)),
         "timestamp": llm.get("timestamp"),
     }
