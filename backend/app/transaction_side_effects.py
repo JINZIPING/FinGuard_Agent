@@ -258,14 +258,6 @@ def create_transaction_with_side_effects(
                     "SELECT * FROM alerts WHERE id = ?", (alert_id,), conn=conn
                 )
 
-                # Look up default tenant so the case is queryable by tenant_id
-                default_tenant = fetch_one(
-                    "SELECT id FROM tenants WHERE slug = 'default'",
-                    (),
-                    conn=conn,
-                )
-                tenant_id_val = default_tenant["id"] if default_tenant else None
-
                 case_id = execute(
                     """
                     INSERT INTO cases (
@@ -275,7 +267,7 @@ def create_transaction_with_side_effects(
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        tenant_id if tenant_id is not None else tenant_id_val,
+                        tenant_id,
                         portfolio["id"],
                         transaction_id,
                         alert_id,
@@ -289,7 +281,6 @@ def create_transaction_with_side_effects(
                         total_amount,
                         json.dumps(flags),
                         "open",
-                        "new",
                         "ml_risk_detection",
                         json.dumps(
                             {

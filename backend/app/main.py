@@ -32,15 +32,18 @@ from app.db import init_db
 
 app = FastAPI(title="FinGuard Backend")
 
-cors_origins_raw = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:13000")
-cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
-
-# "*" and allow_credentials=True are mutually exclusive per the CORS spec.
-_allow_all = cors_origins == ["*"]
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://localhost:13000",
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=not _allow_all,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

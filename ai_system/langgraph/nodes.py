@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import perf_counter
 
 from ai_system.app.agents import (
@@ -13,16 +12,6 @@ from ai_system.app.agents import (
 from ai_system.app.analysis_utils import ml_score_transactions
 from ai_system.app.llm import is_rate_limit_error
 from ai_system.langgraph.state import PortfolioAnalysisState
-
-try:
-    from langsmith import traceable
-except ImportError:  # pragma: no cover - tracing is optional at import time
-
-    def traceable(*_: object, **__: object) -> object:
-        def decorator(func: object) -> object:
-            return func
-
-        return decorator
 
 
 def _truncate_error(exc: Exception) -> str:
@@ -100,50 +89,6 @@ def _agent_event(
     )
 
 
-def _thinking_step_event(
-    state: PortfolioAnalysisState,
-    *,
-    node: str,
-    agent_name: str,
-    step_num: int,
-    analysis_type: str,
-    details: str,
-) -> None:
-    """Emit a thinking step event for intermediate reasoning."""
-    _append_trace(
-        state,
-        {
-            "type": "thinking",
-            "node": node,
-            "agent_name": agent_name,
-            "step": step_num,
-            "analysis_type": analysis_type,
-            "details": details,
-            "status": "in_progress",
-        },
-    )
-
-
-def _emit_thinking_steps(
-    state: PortfolioAnalysisState,
-    node: str,
-    agent_name: str,
-    thinking_steps: list[dict] | None,
-) -> None:
-    """Emit all thinking steps from an agent response."""
-    if thinking_steps:
-        for step_info in thinking_steps:
-            if step_info:  # skip None entries
-                _thinking_step_event(
-                    state,
-                    node=node,
-                    agent_name=agent_name,
-                    step_num=step_info.get("step", 0),
-                    analysis_type=step_info.get("analysis", ""),
-                    details=step_info.get("details", ""),
-                )
-
-
 def _compliance_snapshot(transactions: list[dict]) -> str:
     findings: list[str] = []
     unknown_types = sorted(
@@ -201,7 +146,6 @@ def _escalation_snapshot(state: PortfolioAnalysisState) -> str:
     return "Escalation path: queue for human review if related alerts or repeated high-risk transactions continue."
 
 
-@traceable(name="langgraph_ingest_request", run_type="chain")
 def ingest_request(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     state.setdefault("findings", [])
     state.setdefault("errors", [])
@@ -239,7 +183,6 @@ def ingest_request(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     return state
 
 
-@traceable(name="langgraph_quick_recommendation", run_type="chain")
 def run_quick_recommendation(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     start = perf_counter()
     state["response"] = risk.quick_portfolio_recommendation(
@@ -262,56 +205,6 @@ def run_quick_recommendation(state: PortfolioAnalysisState) -> PortfolioAnalysis
     return state
 
 
-@traceable(name="langgraph_run_full_crews_parallel", run_type="chain")
-def run_full_crews_parallel(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
-    """Run all three crews in parallel to reduce rate limit pressure."""
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {
-            executor.submit(_run_crew_one_internal, state): "crew1",
-            executor.submit(_run_crew_two_internal, state): "crew2",
-            executor.submit(_run_crew_three_internal, state): "crew3",
-        }
-
-        for future in as_completed(futures):
-            crew_name = futures[future]
-            try:
-                result_state = future.result()
-                if crew_name == "crew1":
-                    state["crew1_output"] = result_state.get("crew1_output")
-                    if "rate_limited" in result_state:
-                        state["rate_limited"] = result_state["rate_limited"]
-                elif crew_name == "crew2":
-                    state["crew2_output"] = result_state.get("crew2_output")
-                    if "rate_limited" in result_state:
-                        state["rate_limited"] = result_state["rate_limited"]
-                elif crew_name == "crew3":
-                    state["crew3_output"] = result_state.get("crew3_output")
-                    if "rate_limited" in result_state:
-                        state["rate_limited"] = result_state["rate_limited"]
-                state["analysis_trace"].extend(result_state.get("analysis_trace", []))
-            except Exception as exc:
-                state["errors"].append(f"{crew_name} failed: {_truncate_error(exc)}")
-
-    state["crews_run"] = 3
-    return state
-
-
-def _run_crew_one_internal(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
-    """Internal helper to run crew one."""
-    return run_full_crew_one(state.copy() if hasattr(state, 'copy') else dict(state))
-
-
-def _run_crew_two_internal(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
-    """Internal helper to run crew two."""
-    return run_full_crew_two(state.copy() if hasattr(state, 'copy') else dict(state))
-
-
-def _run_crew_three_internal(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
-    """Internal helper to run crew three."""
-    return run_full_crew_three(state.copy() if hasattr(state, 'copy') else dict(state))
-
-
-@traceable(name="langgraph_crew_1_risk_analysis", run_type="chain")
 def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     if state.get("rate_limited"):
         return state
@@ -337,23 +230,6 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
         )
         state["crews_run"] = 1
         duration_ms = _elapsed_ms(start)
-        
-        # Emit thinking steps for Risk Assessment
-        _emit_thinking_steps(
-            state,
-            node="run_full_crew_one",
-            agent_name="Risk Assessment Agent",
-            thinking_steps=risk_assessment.get("thinking_steps"),
-        )
-        
-        # Emit thinking steps for Fraud Detection
-        _emit_thinking_steps(
-            state,
-            node="run_full_crew_one",
-            agent_name="Risk Detection Agent",
-            thinking_steps=fraud_assessment.get("thinking_steps"),
-        )
-        
         _terminal_event(
             state,
             node="run_full_crew_one",
@@ -422,7 +298,6 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
         return state
 
 
-@traceable(name="langgraph_crew_2_portfolio_analysis", run_type="chain")
 def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     if state.get("rate_limited"):
         return state
@@ -450,15 +325,6 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
         )
         state["crews_run"] = 2
         duration_ms = _elapsed_ms(start)
-        
-        # Emit thinking steps for Portfolio Analysis
-        _emit_thinking_steps(
-            state,
-            node="run_full_crew_two",
-            agent_name="Portfolio Analyst",
-            thinking_steps=portfolio_analysis.get("thinking_steps"),
-        )
-        
         _divider_event(
             state,
             node="run_full_crew_two",
@@ -519,7 +385,6 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
         return state
 
 
-@traceable(name="langgraph_crew_3_summary_escalation", run_type="chain")
 def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     if state.get("rate_limited"):
         return state
@@ -605,7 +470,6 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
         return state
 
 
-@traceable(name="langgraph_compile_quick_response", run_type="chain")
 def compile_quick_response(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     response = state.get("response") or {}
     response["analysis_trace"] = state.get("analysis_trace", [])
@@ -614,7 +478,6 @@ def compile_quick_response(state: PortfolioAnalysisState) -> PortfolioAnalysisSt
     return state
 
 
-@traceable(name="langgraph_compile_full_response", run_type="chain")
 def compile_full_response(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     portfolio = state.get("portfolio") or {}
     ml_summary = state.get("ml_summary", "")

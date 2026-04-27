@@ -25,7 +25,6 @@ data/chroma/
 # ── Environment variables ──
 .env
 backend/.env
-ai_system/.env
 
 # ── OS files ──
 .DS_Store

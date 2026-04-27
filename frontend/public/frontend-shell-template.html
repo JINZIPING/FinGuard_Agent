@@ -793,8 +793,8 @@ tr:hover td{background:rgba(56,189,248,.03)}
       </p>
       <div class="btn-group">
         <select id="cases-state" style="padding:8px;border:1px solid #334;border-radius:6px;background:#111;color:#eee">
-          <option value="" selected>All states</option>
-          <option value="open">Open only</option>
+          <option value="">All states</option>
+          <option value="open" selected>Open only</option>
           <option value="new">new</option>
           <option value="under_review">under_review</option>
           <option value="escalated">escalated</option>
@@ -868,7 +868,6 @@ function showPage(name) {
   if (name === 'portfolios' && typeof populateSymbolPickers === 'function') populateSymbolPickers();
   if (name === 'sentiment' && typeof populateSymbolPickers === 'function') populateSymbolPickers();
   if (name === 'analysis' && typeof loadPortfolioSymbols === 'function') loadPortfolioSymbols();
-  if (name === 'cases' && typeof loadCases === 'function') loadCases();
 }
 
 function switchTab(btn, tabId) {
@@ -907,76 +906,6 @@ function setThinkingNotice(el, message) {
   const host = document.getElementById(el);
   if (!host) return;
   host.innerHTML = `<div class="result-box info">${escapeHtml(message)}</div>`;
-}
-
-// ── Animated thinking block helpers ──
-// Shows an animated "agent thinking" block while an API call is in progress.
-// Returns a handle (blockId) that you pass to markThinkDone() when done.
-function startThinking(thinkEl, agentName, stepLabel) {
-  const container = document.getElementById(thinkEl);
-  if (!container) return null;
-  container.innerHTML = '';
-  const bid = 'tblk-' + thinkEl;
-  container.innerHTML = `
-    <div class="think-toggle">
-      <span class="live-pill" id="${bid}-pill">● live</span>
-      <button class="think-toggle-btn" onclick="(function(b){
-        var s=document.getElementById(b+'-stream');
-        if(s){var hidden=s.style.display==='none';s.style.display=hidden?'':'none';this.textContent=hidden?'Hide thinking':'Show thinking';}
-      }).call(this,'${bid}')">Hide thinking</button>
-    </div>
-    <div class="think-stream" id="${bid}-stream">
-      <div class="think-block live" id="${bid}">
-        <button class="think-header" onclick="(function(b){
-          var body=document.getElementById(b+'-body');
-          var chev=document.getElementById(b+'-chev');
-          var open=body.style.display!=='none';
-          body.style.display=open?'none':'block';
-          chev.textContent=open?'▼':'▲';
-        })('${bid}')">
-          <span class="think-dot"></span>
-          <span class="think-agent">${escapeHtml(agentName)}</span>
-          <span class="think-label" id="${bid}-label">${escapeHtml(stepLabel)}</span>
-          <span class="think-chevron" id="${bid}-chev">▲</span>
-        </button>
-        <div class="think-body" id="${bid}-body">
-          <pre>Processing your request with the AI agent…</pre>
-        </div>
-      </div>
-    </div>`;
-  return bid;
-}
-
-function markThinkDone(bid) {
-  if (!bid) return;
-  const block = document.getElementById(bid);
-  if (block) block.className = 'think-block done';
-  const lbl = document.getElementById(bid + '-label');
-  if (lbl) lbl.textContent = 'thought for a moment';
-  const pill = document.getElementById(bid + '-pill');
-  if (pill) {
-    pill.style.background = 'rgba(34,197,94,.1)';
-    pill.style.borderColor = 'rgba(34,197,94,.3)';
-    pill.style.color = 'var(--green)';
-    pill.textContent = '✓ done';
-  }
-}
-
-function markThinkError(bid) {
-  if (!bid) return;
-  const block = document.getElementById(bid);
-  if (block) block.className = 'think-block done';
-  const lbl = document.getElementById(bid + '-label');
-  if (lbl) lbl.textContent = 'encountered an error';
-  const dot = block && block.querySelector('.think-dot');
-  if (dot) dot.style.background = 'var(--red)';
-  const pill = document.getElementById(bid + '-pill');
-  if (pill) {
-    pill.style.background = 'rgba(239,68,68,.1)';
-    pill.style.borderColor = 'rgba(239,68,68,.3)';
-    pill.style.color = 'var(--red)';
-    pill.textContent = '✗ error';
-  }
 }
 
 // ── Reusable SSE consumer ────────────────────────────────────────────────────
@@ -1239,12 +1168,6 @@ async function loadDashboard() {
     document.getElementById('stat-health').textContent = h.status === 'healthy' ? '✅ Healthy' : '❌ Down';
     document.getElementById('stat-health').style.fontSize = '1rem';
   } catch { document.getElementById('stat-health').textContent = '❌'; }
-  try {
-    const resp = await api('/portfolios');
-    const list = Array.isArray(resp) ? resp : (resp.portfolios || []);
-    document.getElementById('stat-portfolios').textContent = list.length;
-    document.getElementById('stat-portfolios').style.fontSize = list.length > 0 ? '1.8rem' : '1rem';
-  } catch { document.getElementById('stat-portfolios').textContent = '0'; }
 }
 loadDashboard();
 
@@ -1553,15 +1476,20 @@ async function scoreRisk() {
 // ── AI Insights for Transaction (SSE-driven) ──
 async function getTransactionAIInsights(scoreData, transactionData) {
   const aiResultEl = document.getElementById('txn-ai-result');
-  const tblk = startThinking('txn-think', 'Explanation Agent', 'Analysing transaction risk factors…');
   try {
+    setThinkingNotice(
+      'txn-think',
+      'Live agent streaming is not available in the current backend yet. Showing the final AI explanation once it returns.'
+    );
     const d = await api('/transaction/get-ai-insights', 'POST', {
       transaction: transactionData,
       score: scoreData.risk_score,
       factors: scoreData.rule_details.details || {}
     });
 
-    markThinkDone(tblk);
+    // Remove the "thinking…" pill from the header
+    const thinkPill = document.querySelector('#risk-result .meta-pill[style*="thinking"]');
+    if (thinkPill) thinkPill.remove();
 
     if (d.blocked) {
       if (aiResultEl) aiResultEl.innerHTML =
@@ -1575,7 +1503,6 @@ async function getTransactionAIInsights(scoreData, transactionData) {
     if (aiResultEl) aiResultEl.innerHTML = `<div class="md">${body}${fallback}</div>`;
 
   } catch(e) {
-    markThinkError(tblk);
     console.log('AI insights error:', e.message);
     if (aiResultEl) aiResultEl.innerHTML =
       `<div style="color:var(--text2);font-size:.8rem;padding:8px 0">⚠️ AI analysis unavailable: ${escapeHtml(e.message)}</div>`;
@@ -1634,10 +1561,12 @@ async function runAnalysis() {
   document.getElementById('ai-result').innerHTML = '';
 
   try {
-    const _aiTblk = startThinking('ai-think', 'Multi-Crew Portfolio Analysis', 'Running 9 sequential agents — Alert Intake → Context → Risk → Explanation → Escalation → Portfolio → Detection → Market Intel → Compliance…');
+    setThinkingNotice(
+      'ai-think',
+      'The current backend returns direct responses for this flow. Live streaming is not available yet, so results will appear when the full analysis finishes.'
+    );
     btn.innerHTML = '<span class="spinner"></span> Running 9 agents… (1-3 min)';
     const d = await api('/portfolio/' + pid + '/analyze', 'POST');
-    markThinkDone(_aiTblk);
 
     let html = '';
     const pills = [
@@ -1652,34 +1581,16 @@ async function runAnalysis() {
     if (d.crew_output) {
       html += renderMarkdown(d.crew_output);
     } else if (Array.isArray(d.analysis_trace) && d.analysis_trace.length) {
-      let traceHtml = '';
-      d.analysis_trace.forEach((entry) => {
-        if (entry.type === 'divider') {
-          traceHtml += `<div style="margin:18px 0 10px;padding:8px 14px;background:rgba(56,189,248,0.08);border-left:3px solid var(--accent);border-radius:4px;font-weight:600;font-size:0.95em;color:var(--accent)">🔀 ${escapeHtml(entry.label||entry.node||'')}</div>`;
-        } else if (entry.type === 'thinking') {
-          traceHtml += `<div style="margin:8px 0;padding:10px 14px;background:rgba(168,85,247,0.08);border-left:3px solid #a855f7;border-radius:4px">
-            <div style="font-size:0.8em;color:#a855f7;font-weight:600;margin-bottom:6px">🧠 ${escapeHtml(entry.agent_name||'Agent')} — Reasoning Step ${entry.step||''}</div>
-            <div style="font-size:0.88em;color:#d8b4fe;line-height:1.6">${escapeHtml(entry.details||'')}</div>
-          </div>`;
-        } else if (entry.type === 'agent' && entry.body) {
-          const statusColor = entry.status === 'failed' ? '#ef4444' : entry.status === 'rate_limited' ? '#f59e0b' : '#22c55e';
-          traceHtml += `<div style="margin:10px 0;padding:12px 14px;background:rgba(15,23,42,0.6);border:1px solid rgba(100,116,139,0.2);border-radius:8px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-              <span style="font-weight:700;color:#e2e8f0">${escapeHtml(entry.name||entry.agent||'Agent')}</span>
-              <span style="font-size:0.78em;padding:2px 8px;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.2);border-radius:12px;color:#7dd3fc">${escapeHtml(entry.crew||'')}</span>
-              <span style="font-size:0.78em;padding:2px 8px;border-radius:12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);color:${statusColor}">● ${escapeHtml(entry.status||'completed')}</span>
-              ${entry.duration_ms ? `<span style="font-size:0.78em;color:#64748b">${entry.duration_ms}ms</span>` : ''}
-            </div>
-            <div style="font-size:0.9em;color:#94a3b8;line-height:1.7">${renderMarkdown(entry.body)}</div>
-          </div>`;
-        } else if (entry.type === 'terminal' && entry.body) {
-          traceHtml += `<div style="margin:8px 0;padding:10px 14px;background:rgba(15,23,42,0.4);border-left:3px solid #475569;border-radius:4px">
-            <div style="font-size:0.8em;color:#64748b;font-weight:600;margin-bottom:4px">⚙️ ${escapeHtml(entry.title||entry.node||'')}</div>
-            <pre style="font-size:0.82em;color:#94a3b8;white-space:pre-wrap;margin:0">${escapeHtml(entry.body)}</pre>
-          </div>`;
-        }
-      });
-      html += traceHtml || renderMarkdown('No trace details available.');
+      const trace = d.analysis_trace.map((entry) => {
+        const parts = [
+          entry.label || entry.node || 'Step',
+          entry.agent ? `Agent: ${entry.agent}` : null,
+          entry.crew ? `Crew: ${entry.crew}` : null,
+          entry.status ? `Status: ${entry.status}` : null,
+        ].filter(Boolean);
+        return `- ${parts.join(' | ')}`;
+      }).join('\n');
+      html += renderMarkdown(`## Analysis Trace\n\n${trace}`);
     } else {
       const stringFields = Object.entries(d).filter(([, v]) => typeof v === 'string' && v.length > 60);
       for (const [, v] of stringFields) html += renderMarkdown(v);
@@ -1691,11 +1602,6 @@ async function runAnalysis() {
     document.getElementById('ai-result').innerHTML = `<div class="result-box success rich">${html}</div>`;
     toast('AI Analysis complete!');
   } catch(e) {
-    const _errTblk = document.querySelector('#ai-think .think-block.live');
-    if (_errTblk) {
-      const bid = _errTblk.id;
-      markThinkError(bid);
-    }
     let msg = e.message || 'Analysis failed';
     if (msg.includes('rate limit') || msg.includes('429')) msg = 'Rate limit exceeded — please wait a moment and try again';
     else if (msg.includes('API key') || msg.includes('401'))  msg = 'API authentication failed — check OPENAI_API_KEY or switch AI_RESPONSE_MODE=mock';
@@ -1751,11 +1657,13 @@ async function getRecommendation() {
   document.getElementById('rec-result').innerHTML = '';
   loadingHtml('rec-result');
   try {
-    const _recTblk = startThinking('rec-think', 'Market Intelligence Agent', 'Generating investment recommendation for ' + symbol + '…');
+    setThinkingNotice(
+      'rec-think',
+      'Live recommendation streaming is not available in the current backend yet. Showing the final recommendation when it returns.'
+    );
     const d = await api('/portfolio/' + pid + '/recommendation', 'POST', {
       symbol, risk_profile: document.getElementById('rec-risk').value,
     });
-    markThinkDone(_recTblk);
     document.getElementById('rec-result').innerHTML = '';
     const pills = [
       { label: '✅ Recommendation', tone: 'green' },
@@ -1768,11 +1676,7 @@ async function getRecommendation() {
     else html += jsonBlock(d);
     document.getElementById('rec-result').innerHTML = `<div class="result-box success rich">${html}</div>`;
     toast('Recommendation received!');
-  } catch(e) {
-    const _errBlk = document.querySelector('#rec-think .think-block.live');
-    if (_errBlk) markThinkError(_errBlk.id);
-    resultHtml('rec-result', '❌ ' + escapeHtml(e.message), 'error'); toast(e.message, 'error');
-  }
+  } catch(e) { resultHtml('rec-result', '❌ ' + escapeHtml(e.message), 'error'); toast(e.message, 'error'); }
 }
 
 // ── Alerts ──
@@ -1833,89 +1737,48 @@ async function runSearch() {
 
   // Clear previous results and show a thinking container
   const searchEl = document.getElementById('search-result');
-  searchEl.innerHTML = '<div id="search-think"></div><div id="search-status"></div>';
-
-  const _searchTblk = startThinking('search-think', 'Knowledge Search Agent', 'Searching knowledge base and querying AI for: "' + query.substring(0, 60) + (query.length > 60 ? '…' : '') + '"');
+  searchEl.innerHTML = '<div id="search-think"></div><div id="search-status" class="result-box info"><span class="spinner"></span> Searching…</div>';
 
   try {
+    setThinkingNotice(
+      'search-think',
+      'Search currently returns direct results from the backend. Live thinking blocks will appear here once streaming search is added.'
+    );
     const d = await api('/search/' + type, 'POST', body);
-    markThinkDone(_searchTblk);
+    // remove the loading box, keep the thinking container
     const statusEl = document.getElementById('search-status');
     if (statusEl) statusEl.remove();
 
-    // If blocked by guardrails
-    if (d.blocked) {
-      const blockedBox = document.createElement('div');
-      blockedBox.className = 'result-box error';
-      blockedBox.innerHTML = `🛡️ Query blocked: ${escapeHtml(d.reason || 'This query is not allowed in the financial analysis system.')}`;
-      searchEl.appendChild(blockedBox);
-      toast('Query blocked by guardrails', 'error');
-      return;
-    }
-
-    // AI agent response (new LLM-powered search)
-    let html = '';
-    if (d.agent_response) {
-      // Add thinking block if available
-      if (d.thinking) {
-        const thinkBox = document.createElement('div');
-        thinkBox.className = 'think-block';
-        thinkBox.innerHTML = `
-          <div class="think-header">
-            <span class="think-label">thinking…</span>
-            <button class="think-toggle" onclick="(function(){var s=this.parentElement.nextElementSibling;if(s){var hidden=s.style.display==='none';s.style.display=hidden?'':'none';this.textContent=hidden?'Hide thinking':'Show thinking';}}).call(this)">Hide thinking</button>
-          </div>
-          <div class="think-content" style="display:none;">${escapeHtml(d.thinking).replace(/\n/g, '<br>')}</div>
-        `;
-        searchEl.appendChild(thinkBox);
-      }
-
-      const pills = [
-        { label: `🤖 AI Search Result`, tone: 'green' },
-        d.context_count != null ? { label: `${d.context_count} context docs` } : null,
-        d.timestamp ? { label: fmtTimestamp(d.timestamp) } : null,
-      ];
-      html += metaRow(pills);
-      html += renderMarkdown(d.agent_response);
-      const resultBox = document.createElement('div');
-      resultBox.className = 'result-box success rich';
-      resultBox.innerHTML = html;
-      searchEl.appendChild(resultBox);
-    }
-
-    // Vector/SQL results
-    if (d.results && d.results.length) {
-      let rhtml = metaRow([{ label: `Found ${d.results.length} knowledge base results`, tone: 'green' }]);
-      d.results.forEach((r, i) => {
-        rhtml += `<h3>Result ${i+1}</h3>`;
-        if (typeof r === 'string') {
-          rhtml += renderMarkdown(r);
-        } else if (r && typeof r === 'object') {
-          const textField = r.content || r.text || r.analysis || r.document;
-          if (typeof textField === 'string') rhtml += renderMarkdown(textField);
-          const meta = Object.entries(r).filter(([k, v]) => typeof v !== 'object' && k !== 'content' && k !== 'text' && k !== 'analysis' && k !== 'document');
-          if (meta.length) {
-            rhtml += '<dl class="kv">';
-            for (const [k, v] of meta) rhtml += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`;
-            rhtml += '</dl>';
-          }
-          if (!textField && !meta.length) rhtml += jsonBlock(r);
-        }
-      });
-      const rBox = document.createElement('div');
-      rBox.className = 'result-box success rich';
-      rBox.innerHTML = rhtml;
-      searchEl.appendChild(rBox);
-      toast(`Found ${d.results.length} results`);
-    } else if (!d.agent_response) {
+    if (!d.results || !d.results.length) {
       const noResult = document.createElement('div');
       noResult.className = 'result-box info';
       noResult.textContent = 'No results found. Try a different query or run an AI analysis first to populate the knowledge base.';
       searchEl.appendChild(noResult);
+      return;
     }
-
+    let html = metaRow([{ label: `Found ${d.results.length} results`, tone: 'green' }]);
+    d.results.forEach((r, i) => {
+      html += `<h3>Result ${i+1}</h3>`;
+      if (typeof r === 'string') {
+        html += renderMarkdown(r);
+      } else if (r && typeof r === 'object') {
+        const textField = r.content || r.text || r.analysis || r.document;
+        if (typeof textField === 'string') html += renderMarkdown(textField);
+        const meta = Object.entries(r).filter(([k, v]) => typeof v !== 'object' && k !== 'content' && k !== 'text' && k !== 'analysis' && k !== 'document');
+        if (meta.length) {
+          html += '<dl class="kv">';
+          for (const [k, v] of meta) html += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`;
+          html += '</dl>';
+        }
+        if (!textField && !meta.length) html += jsonBlock(r);
+      }
+    });
+    const resultBox = document.createElement('div');
+    resultBox.className = 'result-box success rich';
+    resultBox.innerHTML = html;
+    searchEl.appendChild(resultBox);
+    toast(`Found ${d.results.length} results`);
   } catch(e) {
-    markThinkError(_searchTblk);
     const statusEl = document.getElementById('search-status');
     if (statusEl) statusEl.remove();
     const errBox = document.createElement('div');
@@ -1934,9 +1797,11 @@ async function getSentiment() {
   document.getElementById('sent-result').innerHTML = '';
   loadingHtml('sent-result');
   try {
-    const _sentTblk = startThinking('sent-think', 'Market Intelligence Agent', 'Analysing market sentiment for ' + sym.toUpperCase() + '…');
+    setThinkingNotice(
+      'sent-think',
+      'Live sentiment streaming is not available in the current backend yet. Showing the final response when it returns.'
+    );
     const d = await api('/sentiment?symbols=' + encodeURIComponent(sym.toUpperCase()));
-    markThinkDone(_sentTblk);
     document.getElementById('sent-result').innerHTML = '';
     const pills = [
       { label: '📊 Market Sentiment', tone: 'green' },
@@ -1949,11 +1814,7 @@ async function getSentiment() {
     else html += jsonBlock(d);
     document.getElementById('sent-result').innerHTML = `<div class="result-box success rich">${html}</div>`;
     toast('Sentiment loaded for ' + sym.toUpperCase());
-  } catch(e) {
-    const _errBlk = document.querySelector('#sent-think .think-block.live');
-    if (_errBlk) markThinkError(_errBlk.id);
-    resultHtml('sent-result', '❌ ' + escapeHtml(e.message), 'error'); toast(e.message, 'error');
-  }
+  } catch(e) { resultHtml('sent-result', '❌ ' + escapeHtml(e.message), 'error'); toast(e.message, 'error'); }
 }
 
 // ── Cases ──
@@ -2129,23 +1990,12 @@ async function analyzeCase(action) {
   resultEl.innerHTML = '';
   status.textContent = '';
 
-  const _agentNames = {
-    risk: 'Risk Assessment Agent',
-    compliance: 'Compliance Agent',
-    portfolio: 'Portfolio Analysis Agent',
-    recommendation: 'Market Intelligence Agent',
-  };
-  const _stepLabels = {
-    risk: 'Re-assessing transaction risk with full rule + ML pipeline…',
-    compliance: 'Reviewing compliance posture and regulatory flags…',
-    portfolio: 'Analysing portfolio composition and exposure…',
-    recommendation: 'Generating lightweight investment recommendation…',
-  };
-  const _caseTblk = startThinking(thinkEl, _agentNames[action] || 'AI Agent', _stepLabels[action] || 'Processing…');
-
   try {
+    setThinkingNotice(
+      thinkEl,
+      'Case analysis currently returns a final response from the backend. Live thought streaming is not available yet.'
+    );
     const d = await api(`/cases/${_currentCase.id}/analyze`, 'POST', { action });
-    markThinkDone(_caseTblk);
 
     const label = d.label || action;
     const pills = [
@@ -2154,7 +2004,7 @@ async function analyzeCase(action) {
     ];
     let html = metaRow(pills);
     const text =
-      d.body || d.crew_output || d.insights || d.recommendation ||
+      d.crew_output || d.insights || d.recommendation ||
       d.sentiment_analysis || d.explanation ||
       (typeof d === 'string' ? d : JSON.stringify(d, null, 2));
     html += renderMarkdown(String(text));
@@ -2164,7 +2014,6 @@ async function analyzeCase(action) {
     // Reload timeline so the new analysis_requested event shows up
     openCase(_currentCase.id);
   } catch (e) {
-    markThinkError(_caseTblk);
     status.textContent = '';
     resultEl.innerHTML = `<div class="result-box error">❌ ${escapeHtml(e.message)}</div>`;
     toast(e.message, 'error');
