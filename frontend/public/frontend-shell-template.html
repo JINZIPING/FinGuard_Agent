@@ -1943,6 +1943,8 @@ async function getSentiment() {
   try {
     const _sentTblk = startThinking('sent-think', 'Market Intelligence Agent', 'Analysing market sentiment for ' + sym.toUpperCase() + '…');
     const d = await api('/sentiment?symbols=' + encodeURIComponent(sym.toUpperCase()));
+    console.log('[Sentiment] response keys:', Object.keys(d));
+    console.log('[Sentiment] thinking field:', d.thinking);
     markThinkDone(_sentTblk, d.thinking || '');
     document.getElementById('sent-result').innerHTML = '';
     const pills = [
