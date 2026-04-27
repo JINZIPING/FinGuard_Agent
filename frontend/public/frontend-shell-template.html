@@ -1562,7 +1562,7 @@ async function getTransactionAIInsights(scoreData, transactionData) {
       factors: scoreData.rule_details.details || {}
     });
 
-    markThinkDone(tblk);
+    markThinkDone(tblk, d.thinking || (d.insights && d.insights.thinking) || "");
 
     if (d.blocked) {
       if (aiResultEl) aiResultEl.innerHTML =
@@ -1638,7 +1638,7 @@ async function runAnalysis() {
     const _aiTblk = startThinking('ai-think', 'Multi-Crew Portfolio Analysis', 'Running 9 sequential agents — Alert Intake → Context → Risk → Explanation → Escalation → Portfolio → Detection → Market Intel → Compliance…');
     btn.innerHTML = '<span class="spinner"></span> Running 9 agents… (1-3 min)';
     const d = await api('/portfolio/' + pid + '/analyze', 'POST');
-    markThinkDone(_aiTblk);
+    markThinkDone(_aiTblk, (d.analysis_trace||[]).filter(e=>e.type==="thinking").map(e=>e.details).join("\n\n") || d.thinking || "");
 
     let html = '';
     const pills = [
@@ -1756,7 +1756,7 @@ async function getRecommendation() {
     const d = await api('/portfolio/' + pid + '/recommendation', 'POST', {
       symbol, risk_profile: document.getElementById('rec-risk').value,
     });
-    markThinkDone(_recTblk);
+    markThinkDone(_recTblk, d.thinking || "");
     document.getElementById('rec-result').innerHTML = '';
     const pills = [
       { label: '✅ Recommendation', tone: 'green' },
@@ -2146,7 +2146,7 @@ async function analyzeCase(action) {
 
   try {
     const d = await api(`/cases/${_currentCase.id}/analyze`, 'POST', { action });
-    markThinkDone(_caseTblk);
+    markThinkDone(_caseTblk, d.thinking || "");
 
     const label = d.label || action;
     const pills = [
