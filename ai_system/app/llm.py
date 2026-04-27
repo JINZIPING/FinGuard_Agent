@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 
 try:
@@ -90,7 +91,8 @@ def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -
                 max_tokens=2048,
                 temperature=0.7,
             )
-            return response.choices[0].message.content
+            raw = response.choices[0].message.content
+            return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
         except Exception as exc:
             if is_rate_limit_error(exc) and attempt < max_retries - 1:
                 time.sleep(5 * (2 ** attempt))
