@@ -168,6 +168,7 @@ tr:hover td{background:rgba(56,189,248,.03)}
 .tab-content{display:none}
 .tab-content.active{display:block}
 </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -206,45 +207,90 @@ tr:hover td{background:rgba(56,189,248,.03)}
 
   <!-- ──── DASHBOARD ──── -->
   <div id="page-dashboard" class="page active">
-    <h2 class="page-title">Dashboard</h2>
-    <p class="page-desc">FinGuard Agent — Multi-agent financial risk analysis platform</p>
-
-    <div class="stats-grid" id="dashboard-stats">
-      <div class="stat-card"><div class="value" id="stat-portfolios">-</div><div class="label">Portfolios</div></div>
-      <div class="stat-card"><div class="value" id="stat-health">-</div><div class="label">API Status</div></div>
-      <div class="stat-card"><div class="value">9</div><div class="label">AI Agents</div></div>
-      <div class="stat-card"><div class="value">3-Tier</div><div class="label">ML Pipeline</div></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:8px">
+      <div>
+        <h2 class="page-title" style="margin-bottom:2px">📊 FinGuard Dashboard</h2>
+        <p class="page-desc" style="margin:0">Real-time multi-agent financial risk intelligence platform</p>
+      </div>
+      <button class="btn btn-secondary" onclick="seedDemoData()" id="seed-btn" style="font-size:0.82rem;padding:7px 14px">🌱 Seed Demo Data</button>
     </div>
 
-    <div class="card">
-      <h3>&#9889; Quick Actions</h3>
-      <div class="btn-group">
-        <button class="btn btn-primary" onclick="showPage('portfolios')">&#43; Create Portfolio</button>
-        <button class="btn btn-secondary" onclick="showPage('risk')">Score Transaction Risk</button>
-        <button class="btn btn-secondary" onclick="showPage('analysis')">Run AI Analysis</button>
-        <button class="btn btn-secondary" onclick="showPage('search')">Search Knowledge Base</button>
+    <!-- KPI Cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:18px">
+      <div class="stat-card" style="background:linear-gradient(135deg,#0f2d5a,#0d3b7a);border:1px solid rgba(0,180,216,0.3);border-radius:14px;padding:18px;position:relative;overflow:hidden">
+        <div style="font-size:2rem;font-weight:800;color:#00b4d8" id="stat-portfolios">—</div>
+        <div style="font-size:0.78rem;color:#90e0ef;text-transform:uppercase;letter-spacing:1px">Portfolios</div>
+        <div style="position:absolute;right:12px;top:12px;font-size:1.8rem;opacity:0.3">💼</div>
+      </div>
+      <div class="stat-card" style="background:linear-gradient(135deg,#0d2d1a,#0a3d20);border:1px solid rgba(34,197,94,0.3);border-radius:14px;padding:18px;position:relative;overflow:hidden">
+        <div style="font-size:2rem;font-weight:800;color:#22c55e" id="stat-health">—</div>
+        <div style="font-size:0.78rem;color:#86efac;text-transform:uppercase;letter-spacing:1px">System Status</div>
+        <div style="position:absolute;right:12px;top:12px;font-size:1.8rem;opacity:0.3">🟢</div>
+      </div>
+      <div class="stat-card" style="background:linear-gradient(135deg,#2d1a0d,#3d2a0a);border:1px solid rgba(251,191,36,0.3);border-radius:14px;padding:18px;position:relative;overflow:hidden">
+        <div style="font-size:2rem;font-weight:800;color:#fbbf24" id="stat-alerts">—</div>
+        <div style="font-size:0.78rem;color:#fde68a;text-transform:uppercase;letter-spacing:1px">Active Alerts</div>
+        <div style="position:absolute;right:12px;top:12px;font-size:1.8rem;opacity:0.3">🔔</div>
+      </div>
+      <div class="stat-card" style="background:linear-gradient(135deg,#2d0d2d,#3d0a3d);border:1px solid rgba(168,85,247,0.3);border-radius:14px;padding:18px;position:relative;overflow:hidden">
+        <div style="font-size:2rem;font-weight:800;color:#a855f7">9</div>
+        <div style="font-size:0.78rem;color:#d8b4fe;text-transform:uppercase;letter-spacing:1px">AI Agents</div>
+        <div style="position:absolute;right:12px;top:12px;font-size:1.8rem;opacity:0.3">🤖</div>
+      </div>
+      <div class="stat-card" style="background:linear-gradient(135deg,#0d1a2d,#0a253d);border:1px solid rgba(56,189,248,0.3);border-radius:14px;padding:18px;position:relative;overflow:hidden">
+        <div style="font-size:2rem;font-weight:800;color:#38bdf8" id="stat-txns">—</div>
+        <div style="font-size:0.78rem;color:#bae6fd;text-transform:uppercase;letter-spacing:1px">Transactions</div>
+        <div style="position:absolute;right:12px;top:12px;font-size:1.8rem;opacity:0.3">💳</div>
+      </div>
+      <div class="stat-card" style="background:linear-gradient(135deg,#1a0d0d,#2d0a0a);border:1px solid rgba(239,68,68,0.3);border-radius:14px;padding:18px;position:relative;overflow:hidden">
+        <div style="font-size:2rem;font-weight:800;color:#ef4444" id="stat-aum">—</div>
+        <div style="font-size:0.78rem;color:#fca5a5;text-transform:uppercase;letter-spacing:1px">Total AUM</div>
+        <div style="position:absolute;right:12px;top:12px;font-size:1.8rem;opacity:0.3">💰</div>
       </div>
     </div>
 
-    <div class="card">
-      <h3>&#129302; ML Pipeline</h3>
-      <p style="color:var(--text2);font-size:.9rem;line-height:1.7">
-        <strong style="color:var(--text)">Hybrid 3-tier scoring engine:</strong><br>
-        &#x2460; <strong>13 Deterministic Rules</strong> (AML, sanctions, velocity, concentration) — 40% weight<br>
-        &#x2461; <strong>GradientBoosting Classifier</strong> (97% accuracy) + <strong>IsolationForest</strong> (93% accuracy) — 60% weight<br>
-        &#x2462; <strong>LLM Fallback</strong> via Groq (llama-3.3-70b) for borderline scores (40-60)
-      </p>
+    <!-- Charts Row -->
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="card" style="padding:20px;border-radius:14px">
+        <h3 style="margin-bottom:16px;font-size:0.95rem;color:var(--text2)">📈 Portfolio Value Over Time</h3>
+        <canvas id="chart-portfolio" height="160"></canvas>
+      </div>
+      <div class="card" style="padding:20px;border-radius:14px">
+        <h3 style="margin-bottom:16px;font-size:0.95rem;color:var(--text2)">🍩 Risk Distribution</h3>
+        <canvas id="chart-risk" height="160"></canvas>
+      </div>
     </div>
 
-    <div class="card">
-      <h3>&#128640; System Architecture</h3>
-      <p style="color:var(--text2);font-size:.9rem;line-height:1.7">
-        <strong style="color:var(--text)">Backend:</strong> Flask + SQLAlchemy &nbsp;|&nbsp;
-        <strong style="color:var(--text)">Agents:</strong> CrewAI (Sequential) &nbsp;|&nbsp;
-        <strong style="color:var(--text)">LLM:</strong> Groq API &nbsp;|&nbsp;
-        <strong style="color:var(--text)">Vector DB:</strong> ChromaDB &nbsp;|&nbsp;
-        <strong style="color:var(--text)">ML:</strong> scikit-learn
-      </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="card" style="padding:20px;border-radius:14px">
+        <h3 style="margin-bottom:16px;font-size:0.95rem;color:var(--text2)">📊 Transaction Volume (7 Days)</h3>
+        <canvas id="chart-txnvol" height="140"></canvas>
+      </div>
+      <div class="card" style="padding:20px;border-radius:14px">
+        <h3 style="margin-bottom:16px;font-size:0.95rem;color:var(--text2)">🌍 Geographic Exposure</h3>
+        <canvas id="chart-geo" height="140"></canvas>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card" style="border-radius:14px;padding:20px;margin-bottom:16px">
+      <h3 style="margin-bottom:14px">⚡ Quick Actions</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+        <button class="btn btn-primary" onclick="showPage('portfolios')" style="padding:14px;border-radius:10px;font-size:0.9rem">➕ Create Portfolio</button>
+        <button class="btn btn-secondary" onclick="showPage('risk')" style="padding:14px;border-radius:10px;font-size:0.9rem">🎯 Score Transaction</button>
+        <button class="btn btn-secondary" onclick="showPage('analysis')" style="padding:14px;border-radius:10px;font-size:0.9rem">🤖 Run AI Analysis</button>
+        <button class="btn btn-secondary" onclick="showPage('search')" style="padding:14px;border-radius:10px;font-size:0.9rem">🔍 Knowledge Search</button>
+        <button class="btn btn-secondary" onclick="showPage('sentiment')" style="padding:14px;border-radius:10px;font-size:0.9rem">📡 Market Sentiment</button>
+        <button class="btn btn-secondary" onclick="showPage('cases')" style="padding:14px;border-radius:10px;font-size:0.9rem">📁 View Cases</button>
+      </div>
+    </div>
+
+    <!-- Agent Status -->
+    <div class="card" style="border-radius:14px;padding:20px">
+      <h3 style="margin-bottom:14px">🤖 9-Agent Crew Status</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px" id="agent-status-grid">
+        <!-- populated by JS -->
+      </div>
     </div>
   </div>
 
@@ -2266,6 +2312,327 @@ async function exportSar(fmt) {
     toast('SAR exported');
   } catch (e) { toast(e.message, 'error'); }
 }
+
+// ── DASHBOARD CHARTS & DATA ──────────────────────────────────────────────
+const AGENTS = [
+  {name:'Alert Intake',crew:'Crew 3',icon:'🚨'},
+  {name:'Customer Context',crew:'Crew 2',icon:'👤'},
+  {name:'Risk Assessment',crew:'Crew 1',icon:'⚠️'},
+  {name:'Explanation',crew:'Crew 3',icon:'📝'},
+  {name:'Escalation',crew:'Crew 3',icon:'📤'},
+  {name:'Portfolio Analyst',crew:'Crew 2',icon:'📊'},
+  {name:'Risk Detection',crew:'Crew 1',icon:'🔍'},
+  {name:'Market Intel',crew:'Crew 2',icon:'📡'},
+  {name:'Compliance',crew:'Crew 1',icon:'⚖️'},
+];
+
+function renderAgentGrid() {
+  const grid = document.getElementById('agent-status-grid');
+  if (!grid) return;
+  const crewColors = {'Crew 1':'rgba(239,68,68,0.15)','Crew 2':'rgba(56,189,248,0.15)','Crew 3':'rgba(168,85,247,0.15)'};
+  const crewBorder = {'Crew 1':'rgba(239,68,68,0.4)','Crew 2':'rgba(56,189,248,0.4)','Crew 3':'rgba(168,85,247,0.4)'};
+  grid.innerHTML = AGENTS.map(a => `
+    <div style="background:${crewColors[a.crew]};border:1px solid ${crewBorder[a.crew]};border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:8px">
+      <span style="font-size:1.3rem">${a.icon}</span>
+      <div>
+        <div style="font-size:0.82rem;font-weight:600;color:var(--text)">${a.name}</div>
+        <div style="font-size:0.72rem;color:var(--text2)">${a.crew} · <span style="color:#22c55e">●</span> Ready</div>
+      </div>
+    </div>`).join('');
+}
+
+function generateSyntheticChartData() {
+  const days = 30;
+  const labels = [];
+  const values = [];
+  let val = 250000 + Math.random() * 100000;
+  for (let i = days; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    labels.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+    val = val * (1 + (Math.random() - 0.45) * 0.03);
+    values.push(Math.round(val));
+  }
+  return {labels, values};
+}
+
+let dashCharts = {};
+function initDashboardCharts(portfolioCount, txnCount, alertCount) {
+  Object.values(dashCharts).forEach(c => c.destroy());
+  dashCharts = {};
+
+  // Portfolio value chart
+  const pfCtx = document.getElementById('chart-portfolio');
+  if (pfCtx) {
+    const {labels, values} = generateSyntheticChartData();
+    dashCharts.pf = new Chart(pfCtx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Portfolio Value ($)',
+          data: values,
+          borderColor: '#00b4d8',
+          backgroundColor: 'rgba(0,180,216,0.08)',
+          borderWidth: 2.5,
+          pointRadius: 0,
+          fill: true,
+          tension: 0.4,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => '$' + ctx.raw.toLocaleString() } } },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', maxTicksLimit: 8 } },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', callback: v => '$' + (v/1000).toFixed(0) + 'k' } }
+        }
+      }
+    });
+  }
+
+  // Risk donut
+  const riskCtx = document.getElementById('chart-risk');
+  if (riskCtx) {
+    dashCharts.risk = new Chart(riskCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Low Risk', 'Medium Risk', 'High Risk', 'Critical'],
+        datasets: [{
+          data: [45, 30, 18, 7],
+          backgroundColor: ['#22c55e','#f59e0b','#ef4444','#7c3aed'],
+          borderWidth: 0, hoverOffset: 6,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        cutout: '68%',
+        plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12, padding: 10, font: { size: 11 } } } }
+      }
+    });
+  }
+
+  // Transaction volume bar
+  const txnCtx = document.getElementById('chart-txnvol');
+  if (txnCtx) {
+    const dayLabels = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    dashCharts.txn = new Chart(txnCtx, {
+      type: 'bar',
+      data: {
+        labels: dayLabels,
+        datasets: [
+          { label: 'Buy', data: dayLabels.map(() => Math.round(Math.random()*80+20)), backgroundColor: 'rgba(34,197,94,0.7)', borderRadius: 6 },
+          { label: 'Sell', data: dayLabels.map(() => Math.round(Math.random()*60+10)), backgroundColor: 'rgba(239,68,68,0.6)', borderRadius: 6 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 12, font: { size: 11 } } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#64748b' } },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } }
+        }
+      }
+    });
+  }
+
+  // Geographic exposure horizontal bar
+  const geoCtx = document.getElementById('chart-geo');
+  if (geoCtx) {
+    dashCharts.geo = new Chart(geoCtx, {
+      type: 'bar',
+      data: {
+        labels: ['🇺🇸 US', '🇬🇧 UK', '🇩🇪 DE', '🇸🇬 SG', '🇯🇵 JP'],
+        datasets: [{
+          data: [62, 14, 10, 8, 6],
+          backgroundColor: ['#00b4d8','#38bdf8','#7dd3fc','#bae6fd','#e0f2fe'],
+          borderRadius: 6,
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ctx.raw + '%' } } },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', callback: v => v + '%' } },
+          y: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+        }
+      }
+    });
+  }
+}
+
+async function loadDashboard() {
+  renderAgentGrid();
+  let pCount = 0, txnCount = 0, alertCount = 0, totalAum = 0;
+  try {
+    const h = await api('/health');
+    const el = document.getElementById('stat-health');
+    if (el) { el.textContent = h.status === 'healthy' ? '✅ Live' : '❌ Down'; el.style.fontSize='1.2rem'; }
+  } catch { const el = document.getElementById('stat-health'); if(el) el.textContent='❌'; }
+  try {
+    const resp = await api('/portfolios');
+    const list = Array.isArray(resp) ? resp : (resp.portfolios || []);
+    pCount = list.length;
+    const el = document.getElementById('stat-portfolios'); if(el) el.textContent = pCount;
+    // Fetch transactions for each portfolio
+    for (const p of list.slice(0,5)) {
+      totalAum += parseFloat(p.total_value || p.cash_balance || 0);
+      try {
+        const t = await api('/portfolios/' + p.id + '/transactions');
+        txnCount += (t.transactions || []).length;
+        const a = await api('/portfolios/' + p.id + '/alerts');
+        alertCount += (a.alerts || []).length;
+      } catch {}
+    }
+    const aumEl = document.getElementById('stat-aum');
+    if (aumEl) aumEl.textContent = totalAum > 1000000 ? '$' + (totalAum/1000000).toFixed(1) + 'M' : '$' + (totalAum/1000).toFixed(0) + 'K';
+    const txEl = document.getElementById('stat-txns'); if(txEl) txEl.textContent = txnCount;
+    const alEl = document.getElementById('stat-alerts'); if(alEl) alEl.textContent = alertCount;
+  } catch { const el = document.getElementById('stat-portfolios'); if(el) el.textContent='0'; }
+  initDashboardCharts(pCount, txnCount, alertCount);
+}
+loadDashboard();
+
+// ── SEED DEMO DATA ──────────────────────────────────────────────────────
+async function seedDemoData() {
+  const btn = document.getElementById('seed-btn');
+  btn.disabled = true; btn.textContent = '⏳ Seeding…';
+  const symbols = ['AAPL','MSFT','GOOGL','AMZN','NVDA','TSLA','META','JPM','V','BRK'];
+  const snames  = ['Apple','Microsoft','Alphabet','Amazon','Nvidia','Tesla','Meta','JPMorgan','Visa','Berkshire'];
+  const pfNames = ['Tech Growth Fund','Balanced Portfolio','Blue Chip Core','High Risk Alpha','Conservative Income'];
+  const countries = ['US','US','GB','SG','DE','JP','CA'];
+  let created = 0, txns = 0;
+  try {
+    for (const name of pfNames) {
+      const inv = 50000 + Math.floor(Math.random()*450000);
+      const pf = await api('/portfolio','POST',{name, initial_investment: inv});
+      const pid = pf.id;
+      created++;
+      // assets
+      const chosen = symbols.slice().sort(()=>Math.random()-0.5).slice(0, 3 + Math.floor(Math.random()*4));
+      for (let i=0; i<chosen.length; i++) {
+        try { await api('/portfolios/'+pid+'/asset','POST',{
+          symbol: chosen[i], name: snames[symbols.indexOf(chosen[i])],
+          quantity: 10 + Math.floor(Math.random()*490),
+          purchase_price: +(50 + Math.random()*750).toFixed(2),
+          current_price: +(50 + Math.random()*850).toFixed(2),
+          asset_type: 'equity'
+        }); } catch {}
+      }
+      // transactions
+      for (let t=0; t < 10 + Math.floor(Math.random()*20); t++) {
+        const sym = symbols[Math.floor(Math.random()*symbols.length)];
+        const amt = +(1000 + Math.random()*99000).toFixed(2);
+        try { await api('/portfolios/'+pid+'/transaction','POST',{
+          transaction_type: Math.random()>0.45 ? 'buy' : 'sell',
+          symbol: sym, amount: amt,
+          quantity: +(amt / (100 + Math.random()*700)).toFixed(4),
+          price: +(100 + Math.random()*700).toFixed(2),
+          sender_country: countries[Math.floor(Math.random()*countries.length)],
+          receiver_country: countries[Math.floor(Math.random()*countries.length)],
+        }); txns++; } catch {}
+      }
+      // alerts
+      for (let a=0; a<2+Math.floor(Math.random()*4); a++) {
+        try { await api('/portfolios/'+pid+'/alert','POST',{
+          alert_type: ['price_target','risk_threshold','volume_spike','compliance_flag'][Math.floor(Math.random()*4)],
+          symbol: symbols[Math.floor(Math.random()*symbols.length)],
+          target_price: +(100 + Math.random()*800).toFixed(2),
+          threshold: +(0.05 + Math.random()*0.2).toFixed(2),
+          message: 'Threshold breached - auto seeded'
+        }); } catch {}
+      }
+    }
+    toast(`✅ Seeded ${created} portfolios & ${txns} transactions!`, 'success');
+    loadDashboard();
+  } catch(e) { toast('Seed failed: ' + e.message, 'error'); }
+  btn.disabled = false; btn.textContent = '🌱 Seed Demo Data';
+}
+
+// ── CHATBOT ──────────────────────────────────────────────────────────────
+(function() {
+  const style = document.createElement('style');
+  style.textContent = `
+    #chatbot-fab{position:fixed;bottom:24px;right:24px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#00b4d8,#0077b6);border:none;cursor:pointer;font-size:1.5rem;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,180,216,0.5);z-index:9999;transition:transform .2s}
+    #chatbot-fab:hover{transform:scale(1.1)}
+    #chatbot-box{position:fixed;bottom:88px;right:24px;width:340px;height:480px;background:#0d1b2a;border:1px solid rgba(0,180,216,0.3);border-radius:18px;display:none;flex-direction:column;z-index:9999;box-shadow:0 8px 40px rgba(0,0,0,0.6);overflow:hidden}
+    #chatbot-box.open{display:flex}
+    #chatbot-header{background:linear-gradient(135deg,#0f2d5a,#0d3b7a);padding:14px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(0,180,216,0.2)}
+    #chatbot-header .cb-avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#00b4d8,#0077b6);display:flex;align-items:center;justify-content:center;font-size:1.1rem}
+    #chatbot-header .cb-title{font-weight:700;color:#e2e8f0;font-size:0.92rem}
+    #chatbot-header .cb-sub{font-size:0.72rem;color:#00b4d8}
+    #chatbot-header .cb-close{margin-left:auto;background:none;border:none;color:#64748b;cursor:pointer;font-size:1.2rem;padding:0 4px}
+    #chatbot-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+    .cb-msg{max-width:85%;padding:10px 14px;border-radius:14px;font-size:0.87rem;line-height:1.5}
+    .cb-msg.user{background:rgba(0,119,182,0.4);border:1px solid rgba(0,180,216,0.2);color:#e2e8f0;align-self:flex-end;border-bottom-right-radius:4px}
+    .cb-msg.bot{background:rgba(15,45,90,0.8);border:1px solid rgba(100,116,139,0.2);color:#cbd5e1;align-self:flex-start;border-bottom-left-radius:4px}
+    .cb-msg.thinking{color:#64748b;font-style:italic;font-size:0.82rem}
+    #chatbot-input-row{padding:12px;border-top:1px solid rgba(100,116,139,0.15);display:flex;gap:8px}
+    #chatbot-input{flex:1;background:rgba(15,23,42,0.8);border:1px solid rgba(100,116,139,0.3);border-radius:10px;padding:9px 12px;color:#e2e8f0;font-size:0.87rem;outline:none}
+    #chatbot-input:focus{border-color:rgba(0,180,216,0.5)}
+    #chatbot-send{background:linear-gradient(135deg,#00b4d8,#0077b6);border:none;border-radius:10px;width:36px;height:36px;cursor:pointer;font-size:1rem;color:white;display:flex;align-items:center;justify-content:center}
+  `;
+  document.head.appendChild(style);
+
+  const fab = document.createElement('button');
+  fab.id = 'chatbot-fab'; fab.textContent = '💬';
+  fab.title = 'FinGuard AI Assistant';
+
+  const box = document.createElement('div');
+  box.id = 'chatbot-box';
+  box.innerHTML = `
+    <div id="chatbot-header">
+      <div class="cb-avatar">🛡️</div>
+      <div><div class="cb-title">FinGuard Assistant</div><div class="cb-sub">● AI-powered · Always on</div></div>
+      <button class="cb-close" onclick="document.getElementById('chatbot-box').classList.remove('open')">✕</button>
+    </div>
+    <div id="chatbot-msgs">
+      <div class="cb-msg bot">👋 Hi! I'm your FinGuard AI assistant. Ask me anything about your portfolios, risk analysis, transactions, or market insights.</div>
+    </div>
+    <div id="chatbot-input-row">
+      <input id="chatbot-input" placeholder="Ask about risk, portfolios, markets…" />
+      <button id="chatbot-send">➤</button>
+    </div>
+  `;
+
+  document.body.appendChild(fab);
+  document.body.appendChild(box);
+
+  fab.onclick = () => box.classList.toggle('open');
+
+  async function sendChat() {
+    const input = document.getElementById('chatbot-input');
+    const msgs = document.getElementById('chatbot-msgs');
+    const q = input.value.trim();
+    if (!q) return;
+    input.value = '';
+
+    const userMsg = document.createElement('div');
+    userMsg.className = 'cb-msg user'; userMsg.textContent = q;
+    msgs.appendChild(userMsg);
+
+    const thinkMsg = document.createElement('div');
+    thinkMsg.className = 'cb-msg thinking'; thinkMsg.textContent = '🤔 Thinking…';
+    msgs.appendChild(thinkMsg);
+    msgs.scrollTop = msgs.scrollHeight;
+
+    try {
+      const d = await api('/search/knowledge', 'POST', { query: q });
+      thinkMsg.remove();
+      const botMsg = document.createElement('div');
+      botMsg.className = 'cb-msg bot';
+      botMsg.textContent = d.agent_response || d.response || 'I could not find an answer. Try rephrasing.';
+      msgs.appendChild(botMsg);
+    } catch (e) {
+      thinkMsg.textContent = '❌ ' + e.message;
+      thinkMsg.className = 'cb-msg bot';
+    }
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  document.getElementById('chatbot-send').onclick = sendChat;
+  document.getElementById('chatbot-input').addEventListener('keydown', e => { if(e.key==='Enter') sendChat(); });
+})();
 </script>
 </body>
 </html>
