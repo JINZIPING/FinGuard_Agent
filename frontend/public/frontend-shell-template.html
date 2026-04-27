@@ -1638,7 +1638,13 @@ async function runAnalysis() {
     const _aiTblk = startThinking('ai-think', 'Multi-Crew Portfolio Analysis', 'Running 9 sequential agents — Alert Intake → Context → Risk → Explanation → Escalation → Portfolio → Detection → Market Intel → Compliance…');
     btn.innerHTML = '<span class="spinner"></span> Running 9 agents… (1-3 min)';
     const d = await api('/portfolio/' + pid + '/analyze', 'POST');
-    markThinkDone(_aiTblk, (d.analysis_trace||[]).filter(e=>e.type==="thinking").map(e=>e.details).join("\n\n") || d.thinking || "");
+    console.log('[AI Analysis] Full response:', d);
+    console.log('[AI Analysis] analysis_trace:', d.analysis_trace);
+    const thinkingEvents = (d.analysis_trace||[]).filter(e=>e.type==="thinking");
+    console.log('[AI Analysis] thinking events:', thinkingEvents);
+    const thinkingText = thinkingEvents.map(e=>e.details).join("\n\n") || d.thinking || "";
+    console.log('[AI Analysis] thinking text:', thinkingText);
+    markThinkDone(_aiTblk, thinkingText);
 
     let html = '';
     const pills = [
