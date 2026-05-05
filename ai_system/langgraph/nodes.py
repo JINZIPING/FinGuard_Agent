@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import perf_counter
 
 from ai_system.app.agents import (
+    compliance_agent as compliance,
     explanation_agent as explanation,
     market_intelligence_agent as market,
     portfolio_analysis_agent as portfolio,
@@ -181,30 +182,6 @@ def _emit_thinking_steps(
                 )
 
 
-def _compliance_snapshot(transactions: list[dict]) -> str:
-    findings: list[str] = []
-    unknown_types = sorted(
-        {
-            (txn.get("type") or "").lower()
-            for txn in transactions
-            if (txn.get("type") or "").lower() not in {"buy", "sell", "dividend", ""}
-        }
-    )
-    if unknown_types:
-        findings.append(
-            f"Unsupported transaction types seen: {', '.join(unknown_types)}."
-        )
-    if len(transactions) >= 20:
-        findings.append(
-            "Transaction volume is elevated and may merit reporting-threshold review."
-        )
-    if not findings:
-        findings.append(
-            "No immediate compliance concern was found in the quick policy scan."
-        )
-    return " ".join(findings)
-
-
 def _market_snapshot(symbols: list[str]) -> str:
     if not symbols:
         return "No active symbols were available for a focused market sentiment pass."
@@ -368,7 +345,56 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
             transactions, portfolio_data, ml_scores
         )
         _emit_llm_thinking(state, "run_full_crew_one", "Risk Detection Agent")
-        compliance_result = _compliance_snapshot(transactions)
+        compliance_payload = compliance.invoke(portfolio_data, transactions, mode="full")
+        compliance_structured = compliance_payload.get("structured_output", {}) or {}
+        compliance_prechecks = compliance_payload.get("prechecks", {}) or {}
+        compliance_rule_hits = compliance_prechecks.get("rule_hits", []) or []
+        compliance_rule = compliance_rule_hits[0] if compliance_rule_hits else {}
+        compliance_summary_source = (
+            f"{len(compliance_rule_hits)} compliance precheck(s) require analyst review."
+            if compliance_rule_hits
+            else compliance_structured.get("summary")
+            or compliance_payload.get("summary")
+            or ""
+        )
+        compliance_summary = _clean_one_line(str(compliance_summary_source).strip())
+        compliance_severity = str(
+            compliance_rule.get("severity")
+            or compliance_structured.get("severity")
+            or "unknown"
+        ).strip()
+        compliance_confidence = str(
+            compliance_structured.get("confidence") or "unknown"
+        ).strip()
+        compliance_basis = _clean_one_line(
+            str(compliance_rule.get("basis") or "agent_structured_output"),
+            max_len=80,
+        )
+        compliance_driver = _clean_one_line(
+            str(
+                compliance_rule.get("description")
+                or _first_text(
+                    compliance_structured.get("key_factors"),
+                    "No compliance driver extracted.",
+                )
+            ),
+            max_len=110,
+        )
+        compliance_action = _clean_one_line(
+            _first_text(
+                compliance_structured.get("recommended_actions"),
+                "Continue analyst review using available case context.",
+            ),
+            max_len=110,
+        )
+        if compliance_summary:
+            compliance_result = (
+                f"Compliance {compliance_summary}\n"
+                f"Signal: severity={compliance_severity}; confidence={compliance_confidence}; basis={compliance_basis}; driver={compliance_driver}\n"
+                f"Action: {compliance_action}"
+            )
+        else:
+            compliance_result = "Compliance review returned no analyst summary."
         state["crew1_output"] = (
             f"{risk_assessment['risk_analysis']}\n\n"
             f"{fraud_assessment['assessment']}\n\n"

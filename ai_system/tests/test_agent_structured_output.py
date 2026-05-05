@@ -89,6 +89,8 @@ def test_compliance_agent_invoke_includes_prechecks_and_structured_output(
     payload = response.json()
     assert payload["agent"] == "compliance"
     assert "wire" in payload["prechecks"]["unsupported_types"]
+    assert payload["prechecks"]["rule_hits"][0]["rule_id"] == "UNSUPPORTED_TXN_TYPE"
+    assert payload["prechecks"]["rule_hits"][0]["basis"] == "internal_schema_control"
     assert payload["structured_output"]["severity"] == "high"
     assert payload["structured_output"]["recommended_actions"]
 

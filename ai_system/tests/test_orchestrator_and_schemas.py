@@ -92,6 +92,69 @@ def test_crew_two_market_summary_uses_structured_output(monkeypatch):
     assert "neutral bias" not in result["crew2_output"]
 
 
+def test_crew_one_uses_compliance_agent(monkeypatch):
+    compliance_called: dict = {}
+
+    monkeypatch.setattr(nodes.risk, "score_transaction", lambda txn: {"score": 12})
+    monkeypatch.setattr(
+        nodes.risk,
+        "assess_portfolio_risk",
+        lambda portfolio, market_conditions: {"risk_analysis": "Risk analysis ok."},
+    )
+    monkeypatch.setattr(
+        nodes.risk,
+        "detect_fraud_risk",
+        lambda transactions, portfolio, ml_scores: {"assessment": "Fraud review ok."},
+    )
+    monkeypatch.setattr(nodes, "_emit_llm_thinking", lambda *args, **kwargs: None)
+
+    def fake_compliance_invoke(portfolio, transactions, mode="quick"):
+        compliance_called["portfolio"] = portfolio
+        compliance_called["transactions"] = transactions
+        compliance_called["mode"] = mode
+        return {
+            "prechecks": {
+                "rule_hits": [
+                    {
+                        "rule_id": "UNSUPPORTED_TXN_TYPE",
+                        "severity": "high",
+                        "basis": "internal_schema_control",
+                        "description": "Unsupported transaction type found.",
+                    }
+                ]
+            },
+            "summary": "Fallback compliance summary.",
+            "structured_output": {
+                "summary": "Compliance agent reviewed transaction policy checks.",
+                "severity": "high",
+                "confidence": "medium",
+                "key_factors": ["Unsupported transaction type found."],
+                "recommended_actions": ["Queue the activity for analyst review."],
+            },
+        }
+
+    monkeypatch.setattr(nodes.compliance, "invoke", fake_compliance_invoke)
+    state = {
+        "portfolio": {"id": 1, "name": "Demo"},
+        "transactions": [{"symbol": "MSFT", "type": "buy"}],
+        "analysis_trace": [],
+    }
+
+    result = nodes.run_full_crew_one(state)
+
+    assert compliance_called == {
+        "portfolio": {"id": 1, "name": "Demo"},
+        "transactions": [{"symbol": "MSFT", "type": "buy"}],
+        "mode": "full",
+    }
+    assert "Compliance 1 compliance precheck(s) require analyst review." in result["crew1_output"]
+    assert (
+        "Signal: severity=high; confidence=medium; "
+        "basis=internal_schema_control; driver=Unsupported transaction type found."
+    ) in result["crew1_output"]
+    assert "Action: Queue the activity for analyst review." in result["crew1_output"]
+
+
 def test_portfolio_review_request_defaults_and_nested_dump():
     request = PortfolioReviewRequest(
         portfolio={
