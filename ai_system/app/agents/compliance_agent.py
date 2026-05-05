@@ -10,6 +10,9 @@ from ai_system.app.llm import chat
 
 
 ALLOWED_TRANSACTION_TYPES = {"buy", "sell", "dividend"}
+LARGE_NOTIONAL_REVIEW_THRESHOLD = 10000
+HIGH_ACTIVITY_TRANSACTION_COUNT = 20
+REPEATED_SYMBOL_ACTIVITY_COUNT = 4
 
 
 def _timestamp() -> str:
@@ -49,10 +52,34 @@ def _transaction_amount(txn: dict) -> float:
         return 0.0
 
 
+def _rule_hit(
+    *,
+    rule_id: str,
+    severity: str,
+    basis: str,
+    description: str,
+    evidence: dict,
+) -> dict:
+    return {
+        "rule_id": rule_id,
+        "severity": severity,
+        "basis": basis,
+        "description": description,
+        "evidence": evidence,
+    }
+
+
 def _compliance_prechecks(transactions: list[dict]) -> dict:
-    types = [(txn.get("type") or txn.get("transaction_type") or "").lower() for txn in transactions]
+    types = [
+        (txn.get("type") or txn.get("transaction_type") or "").lower()
+        for txn in transactions
+    ]
     unsupported_types = sorted(
-        {txn_type for txn_type in types if txn_type and txn_type not in ALLOWED_TRANSACTION_TYPES}
+        {
+            txn_type
+            for txn_type in types
+            if txn_type and txn_type not in ALLOWED_TRANSACTION_TYPES
+        }
     )
     symbol_counts: dict[str, int] = {}
     large_transactions = 0
@@ -60,37 +87,89 @@ def _compliance_prechecks(transactions: list[dict]) -> dict:
         symbol = str(txn.get("symbol") or "").upper()
         if symbol:
             symbol_counts[symbol] = symbol_counts.get(symbol, 0) + 1
-        if _transaction_amount(txn) >= 10000:
+        if _transaction_amount(txn) >= LARGE_NOTIONAL_REVIEW_THRESHOLD:
             large_transactions += 1
 
     repeated_symbols = sorted(
-        symbol for symbol, count in symbol_counts.items() if count >= 4
+        symbol
+        for symbol, count in symbol_counts.items()
+        if count >= REPEATED_SYMBOL_ACTIVITY_COUNT
     )
-    findings: list[str] = []
+    rule_hits: list[dict] = []
     if unsupported_types:
-        findings.append(
-            "Unsupported transaction types found: " + ", ".join(unsupported_types) + "."
+        rule_hits.append(
+            _rule_hit(
+                rule_id="UNSUPPORTED_TXN_TYPE",
+                severity="high",
+                basis="internal_schema_control",
+                description=(
+                    "Unsupported transaction types found: "
+                    + ", ".join(unsupported_types)
+                    + "."
+                ),
+                evidence={"unsupported_types": unsupported_types},
+            )
         )
-    if len(transactions) >= 20:
-        findings.append(
-            "High transaction volume should be reviewed for reporting and surveillance thresholds."
+    if len(transactions) >= HIGH_ACTIVITY_TRANSACTION_COUNT:
+        rule_hits.append(
+            _rule_hit(
+                rule_id="HIGH_ACTIVITY_VOLUME",
+                severity="medium",
+                basis="internal_surveillance_heuristic",
+                description=(
+                    "High transaction volume should be reviewed for reporting and "
+                    "surveillance thresholds."
+                ),
+                evidence={
+                    "transaction_count": len(transactions),
+                    "threshold": HIGH_ACTIVITY_TRANSACTION_COUNT,
+                },
+            )
         )
     if repeated_symbols:
-        findings.append(
-            "Repeated same-symbol activity may need trading-policy review: "
-            + ", ".join(repeated_symbols[:5])
-            + "."
+        rule_hits.append(
+            _rule_hit(
+                rule_id="REPEATED_SYMBOL_ACTIVITY",
+                severity="medium",
+                basis="trading_policy_surveillance_heuristic",
+                description=(
+                    "Repeated same-symbol activity may need trading-policy review: "
+                    + ", ".join(repeated_symbols[:5])
+                    + "."
+                ),
+                evidence={
+                    "repeated_symbols": repeated_symbols,
+                    "threshold": REPEATED_SYMBOL_ACTIVITY_COUNT,
+                },
+            )
         )
     if large_transactions:
-        findings.append(
-            f"{large_transactions} transaction(s) meet the large-notional review threshold."
+        rule_hits.append(
+            _rule_hit(
+                rule_id="LARGE_NOTIONAL_REVIEW",
+                severity="medium",
+                basis="internal_surveillance_heuristic",
+                description=(
+                    f"{large_transactions} transaction(s) meet the "
+                    "large-notional review threshold."
+                ),
+                evidence={
+                    "transaction_count": large_transactions,
+                    "threshold": LARGE_NOTIONAL_REVIEW_THRESHOLD,
+                    "threshold_note": (
+                        "Internal notional review threshold; not a CTR determination."
+                    ),
+                },
+            )
         )
+    findings = [hit["description"] for hit in rule_hits]
 
     return {
         "transaction_count": len(transactions),
         "unsupported_types": unsupported_types,
         "large_transactions": large_transactions,
         "repeated_symbols": repeated_symbols,
+        "rule_hits": rule_hits,
         "findings": findings,
     }
 
@@ -149,38 +228,6 @@ def review_transactions_compliance(transactions: list[dict]) -> dict:
     }
 
 
-def generate_tax_report(transaction_history: list[dict], year: int) -> dict:
-    prechecks = _compliance_prechecks(transaction_history)
-    prompt = (
-        f"You are a tax specialist. Generate a tax report for {year} based on:\n\n"
-        f"Transactions:\n{json.dumps(transaction_history, indent=2)}\n\n"
-        f"Deterministic Prechecks:\n{json.dumps(prechecks, indent=2)}\n\n"
-        f"{_compliance_contract('analyst')}\n"
-        "Summarize capital-gains considerations, dividends, tax-loss opportunities, and next steps."
-    )
-    response = chat(prompt)
-    report = response or "Tax report unavailable."
-    severity = _severity_from_prechecks(prechecks, report)
-    return {
-        "agent": "ComplianceOfficer",
-        "timestamp": _timestamp(),
-        "report_type": "tax",
-        "year": year,
-        "report": report,
-        "prechecks": prechecks,
-        "structured_output": build_structured_output(
-            summary=_summary_from_text(report, "Tax report unavailable."),
-            severity=severity,
-            confidence="medium",
-            key_factors=prechecks["findings"]
-            or [f"Transactions reviewed for tax year {year}: {prechecks['transaction_count']}"],
-            recommended_actions=_actions_for_severity(severity),
-            follow_up=["Confirm tax treatment with authoritative records before filing."],
-            raw_text=report,
-        ),
-    }
-
-
 def invoke(portfolio: dict, transactions: list[dict], mode: str = "quick") -> dict:
     if mode == "full":
         result = review_transactions_compliance(transactions)
@@ -223,7 +270,4 @@ class ComplianceAgent:
 
     def review_transactions_compliance(self, transactions: list[dict]) -> dict:
         return review_transactions_compliance(transactions)
-
-    def generate_tax_report(self, transaction_history: list[dict], year: int) -> dict:
-        return generate_tax_report(transaction_history, year)
 
