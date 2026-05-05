@@ -479,13 +479,6 @@ def generate_recommendation(
         "rate_limited": rate_limited,
         "detail_level": clean_detail_level,
         "data_basis": data_basis,
-        "market_view": _market_view(
-            text=recommendation,
-            severity=severity,
-            confidence=confidence,
-            key_factors=key_factors,
-            detail_level=clean_detail_level,
-        ),
         "structured_output": build_structured_output(
             summary=summary,
             severity=severity,
