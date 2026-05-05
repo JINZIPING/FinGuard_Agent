@@ -41,12 +41,14 @@ class PortfolioReviewRequest(BaseModel):
 
 class MarketSentimentRequest(BaseModel):
     symbols: list[str] = Field(default_factory=list)
+    detail_level: str = "short"
 
 
 class MarketRecommendationRequest(BaseModel):
     symbol: str
     portfolio_size: float = 0
     risk_profile: str = "moderate"
+    detail_level: str = "short"
 
 
 class TransactionRiskRequest(BaseModel):

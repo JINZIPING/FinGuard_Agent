@@ -96,11 +96,12 @@ def test_compliance_agent_invoke_includes_prechecks_and_structured_output(
 def test_market_sentiment_includes_data_basis_and_structured_output(ai_system_client):
     response = ai_system_client.post(
         "/market/sentiment",
-        json={"symbols": ["MSFT", "NVDA"]},
+        json={"symbols": ["MSFT", "NVDA"], "detail_level": "detailed"},
     )
     assert response.status_code == 200
     payload = response.json()
     assert payload["symbols"] == ["MSFT", "NVDA"]
+    assert payload["detail_level"] == "detailed"
     assert payload["data_basis"]["live_market_data"] is False
     assert payload["structured_output"]["summary"]
     assert payload["structured_output"]["recommended_actions"]
@@ -113,14 +114,44 @@ def test_market_recommendation_includes_data_basis_and_structured_output(ai_syst
             "symbol": "msft",
             "portfolio_size": 100000,
             "risk_profile": "moderate",
+            "detail_level": "short",
         },
     )
     assert response.status_code == 200
     payload = response.json()
     assert payload["symbol"] == "MSFT"
+    assert payload["detail_level"] == "short"
     assert payload["data_basis"]["live_market_data"] is False
     assert payload["structured_output"]["summary"]
     assert payload["structured_output"]["recommended_actions"]
+
+
+def test_market_sentiment_short_vs_detailed_structured_output_depth(ai_system_client):
+    short_response = ai_system_client.post(
+        "/market/sentiment",
+        json={"symbols": ["MSFT"], "detail_level": "short"},
+    )
+    detailed_response = ai_system_client.post(
+        "/market/sentiment",
+        json={"symbols": ["MSFT"], "detail_level": "detailed"},
+    )
+    assert short_response.status_code == 200
+    assert detailed_response.status_code == 200
+
+    short_payload = short_response.json()
+    detailed_payload = detailed_response.json()
+    assert short_payload["detail_level"] == "short"
+    assert detailed_payload["detail_level"] == "detailed"
+
+    assert len(short_payload["structured_output"]["key_factors"]) < len(
+        detailed_payload["structured_output"]["key_factors"]
+    )
+    assert len(short_payload["structured_output"]["recommended_actions"]) < len(
+        detailed_payload["structured_output"]["recommended_actions"]
+    )
+    assert len(short_payload["structured_output"]["follow_up"]) < len(
+        detailed_payload["structured_output"]["follow_up"]
+    )
 
 
 def test_alert_intake_process_alert_includes_prechecks_and_structured_output():
