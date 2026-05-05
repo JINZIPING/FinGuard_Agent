@@ -83,7 +83,12 @@ def _format_chat_error(error: Exception) -> str:
 
 
 @traceable(name="groq_chat", run_type="llm")
-def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -> str:
+def chat(
+    message: str,
+    system_prompt: str | None = None,
+    max_retries: int = 3,
+    temperature: float | None = None,
+) -> str:
     if is_mock_mode():
         _thinking_store.thinking = ""
         return generate_mock_response(message, system_prompt)
@@ -102,6 +107,7 @@ def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -
 
     client = Groq(api_key=api_key)
     model = os.getenv("GROQ_MODEL", "qwen/qwen3-32b")
+    resolved_temperature = 0.7 if temperature is None else max(0.0, min(1.0, temperature))
 
     messages = []
     if system_prompt:
@@ -114,7 +120,7 @@ def chat(message: str, system_prompt: str | None = None, max_retries: int = 3) -
                 model=model,
                 messages=messages,
                 max_tokens=2048,
-                temperature=0.7,
+                temperature=resolved_temperature,
             )
             raw = response.choices[0].message.content
             match = re.search(r"<think>(.*?)</think>", raw, flags=re.DOTALL)

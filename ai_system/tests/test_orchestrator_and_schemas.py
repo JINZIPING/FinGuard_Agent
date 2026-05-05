@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ai_system.langgraph import nodes
 from ai_system.app import orchestrator
 from ai_system.app.schemas import PortfolioReviewRequest
 
@@ -48,6 +49,47 @@ def test_comprehensive_portfolio_review_uses_full_mode(monkeypatch):
 
     assert orchestrator.comprehensive_portfolio_review({}, []) == {"mode": "full"}
     assert captured["mode"] == "full"
+
+
+def test_crew_two_market_summary_uses_structured_output(monkeypatch):
+    monkeypatch.setattr(
+        nodes.portfolio,
+        "analyze_portfolio",
+        lambda portfolio: {"analysis": "Portfolio analysis ok."},
+    )
+    monkeypatch.setattr(nodes, "_emit_llm_thinking", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        nodes.market,
+        "analyze_sentiment",
+        lambda symbols, detail_level: {
+            "structured_output": {
+                "summary": "MSFT and NVDA signals are mixed.",
+                "severity": "medium",
+                "confidence": "high",
+                "key_factors": ["Earnings and AI demand are the main driver."],
+                "recommended_actions": ["Validate with live prices before trading."],
+            }
+        },
+    )
+    state = {
+        "portfolio": {
+            "id": 1,
+            "name": "Demo",
+            "assets": [{"symbol": "MSFT"}, {"symbol": "NVDA"}],
+        },
+        "transactions": [],
+        "analysis_trace": [],
+    }
+
+    result = nodes.run_full_crew_two(state)
+
+    assert "Market MSFT and NVDA signals are mixed." in result["crew2_output"]
+    assert (
+        "Signal: severity=medium; confidence=high; "
+        "driver=Earnings and AI demand are the main driver."
+    ) in result["crew2_output"]
+    assert "Action: Validate with live prices before trading." in result["crew2_output"]
+    assert "neutral bias" not in result["crew2_output"]
 
 
 def test_portfolio_review_request_defaults_and_nested_dump():

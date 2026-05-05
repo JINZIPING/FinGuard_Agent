@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import perf_counter
 
 from ai_system.app.agents import (
     explanation_agent as explanation,
+    market_intelligence_agent as market,
     portfolio_analysis_agent as portfolio,
     risk_assessment_agent as risk,
 )
@@ -27,6 +29,27 @@ except ImportError:  # pragma: no cover - tracing is optional at import time
 
 def _truncate_error(exc: Exception) -> str:
     return str(exc)[:200]
+
+
+def _clean_one_line(text: str, max_len: int = 180) -> str:
+    cleaned = re.sub(r"\*\*([^*]+)\*\*", r"\1", text or "")
+    cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
+    cleaned = re.sub(r"^[\-\*\u2022]\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = " ".join(cleaned.split()).strip()
+    if len(cleaned) <= max_len:
+        return cleaned
+    return cleaned[: max_len - 3].rstrip() + "..."
+
+
+def _first_text(value: object, fallback: str) -> str:
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            text = str(item).strip()
+            if text:
+                return text
+        return fallback
+    text = str(value or "").strip()
+    return text or fallback
 
 
 def _emit_llm_thinking(state: PortfolioAnalysisState, node: str, agent_name: str) -> None:
@@ -458,7 +481,40 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     try:
         portfolio_analysis = portfolio.analyze_portfolio(portfolio_data)
         _emit_llm_thinking(state, "run_full_crew_two", "Portfolio Analyst")
-        market_result = _market_snapshot(symbols or fallback_symbols)
+        market_payload = market.analyze_sentiment(
+            symbols or fallback_symbols,
+            detail_level="short",
+        )
+        market_structured = market_payload.get("structured_output", {}) or {}
+        market_summary = _clean_one_line(
+            str(market_structured.get("summary") or "").strip()
+        )
+        market_severity = str(market_structured.get("severity") or "unknown").strip()
+        market_confidence = str(market_structured.get("confidence") or "unknown").strip()
+        market_driver = _clean_one_line(
+            _first_text(
+                market_structured.get("key_factors"),
+                "No key driver extracted.",
+            ),
+            max_len=110,
+        )
+        market_action = _clean_one_line(
+            _first_text(
+                market_structured.get("recommended_actions"),
+                "Validate with current market data before acting.",
+            ),
+            max_len=110,
+        )
+        if market_summary:
+            market_result = (
+                f"Market {market_summary}\n"
+                f"Signal: severity={market_severity}; confidence={market_confidence}; driver={market_driver}\n"
+                f"Action: {market_action}\n"
+                "Scope: model-generated context; no live market feed.\n"
+                "Use the dedicated sentiment endpoint for a deeper symbol-level read."
+            )
+        else:
+            market_result = _market_snapshot(symbols or fallback_symbols)
         customer_result = _customer_snapshot(portfolio_data, transactions)
         state["crew2_output"] = (
             f"{portfolio_analysis['analysis']}\n\n"

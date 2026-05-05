@@ -113,7 +113,12 @@ def orchestrate_portfolio_review(payload: PortfolioReviewRequest) -> dict[str, A
 @app.post("/market/sentiment")
 def get_market_sentiment(payload: MarketSentimentRequest) -> dict[str, Any]:
     try:
-        return market.analyze_sentiment(payload.symbols)
+        detail_level = (
+            payload.detail_level
+            if "detail_level" in payload.model_fields_set
+            else "detailed"
+        )
+        return market.analyze_sentiment(payload.symbols, detail_level=detail_level)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=_handle_agent_error(exc)) from exc
 
@@ -121,8 +126,16 @@ def get_market_sentiment(payload: MarketSentimentRequest) -> dict[str, Any]:
 @app.post("/market/recommendation")
 def get_market_recommendation(payload: MarketRecommendationRequest) -> dict[str, Any]:
     try:
+        detail_level = (
+            payload.detail_level
+            if "detail_level" in payload.model_fields_set
+            else "detailed"
+        )
         return market.generate_recommendation(
-            payload.symbol, payload.portfolio_size, payload.risk_profile
+            payload.symbol,
+            payload.portfolio_size,
+            payload.risk_profile,
+            detail_level,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=_handle_agent_error(exc)) from exc
