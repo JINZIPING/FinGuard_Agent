@@ -1,6 +1,6 @@
 # FinGuard Comprehensive Guide
 
-Last updated: 2026-04-25
+Last updated: 2026-05-06
 
 ## 1. What FinGuard Is
 
@@ -42,7 +42,7 @@ Service responsibilities:
 4. Frontend calls `POST /api/portfolios/{id}/analyze`.
 5. Backend builds a normalized payload and calls `ai_system`.
 6. AI system runs LangGraph and internal agents.
-7. AI system returns final output plus `analysis_trace`.
+7. AI system returns final output, structured crew result blocks, top-level recommendation metadata, and `analysis_trace`.
 8. Frontend renders the real trace and final analysis.
 
 ## 4. Internal Agents
@@ -77,13 +77,23 @@ ingest_request
 Returned trace events include:
 
 - `sequence`
+- `contract_version`
 - `type`
 - `node`
 - `crew`
+- `agent`
 - `name`
 - `status`
 - `duration_ms`
 - `body`
+- `structured_summary`
+- `severity`
+- `confidence`
+- `evidence_refs`
+- `fallback_used`
+- `fallback_reason`
+- `rate_limited`
+- `data_basis`
 
 The trace is real after completion. It is not yet streamed live while the request is running.
 

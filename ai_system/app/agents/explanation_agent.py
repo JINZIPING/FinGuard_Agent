@@ -332,7 +332,13 @@ Analysis Results:
 
 {_agent_contract("analyst")}
 
-Detail level: {detail_level}. Prioritize operational next steps over long narrative."""
+Detail level: {detail_level}.
+
+Requirements:
+- Use the structured evidence provided in the analysis results.
+- Cite specific agent findings or key factors when explaining why the conclusion was reached.
+- Do not invent evidence that is not present in the supplied results.
+- Prioritize operational next steps over long narrative."""
     result = chat(prompt)
     summary = result or "Summary unavailable."
     return {

@@ -171,6 +171,9 @@ def test_alert_intake_process_alert_includes_prechecks_and_structured_output():
     assert payload["agent"] == "AlertIntake"
     assert payload["prechecks"]["large_amount"] is True
     assert payload["structured_output"]["severity"] == "high"
+    assert payload["escalation_recommendation"] == "Yes"
+    assert payload["priority_tier"] == "P2"
+    assert payload["urgency_level"] == "High"
     assert payload["structured_output"]["recommended_actions"]
 
 
@@ -184,6 +187,50 @@ def test_alert_intake_validation_uses_missing_field_prechecks():
     assert payload["is_valid"] is False
     assert "timestamp" in payload["prechecks"]["missing_fields"]
     assert payload["structured_output"]["recommended_actions"]
+
+
+def test_alert_intake_accumulated_findings_uses_upstream_signals():
+    from ai_system.app.agents import alert_intake_agent
+
+    payload = alert_intake_agent.process_accumulated_findings(
+        {
+            "crew1_results": {
+                "risk_assessment": {
+                    "structured_output": {"severity": "high"},
+                },
+                "risk_detection": {
+                    "structured_output": {"severity": "medium"},
+                },
+                "compliance": {
+                    "prechecks": {
+                        "rule_hits": [{"rule_id": "AML_ALERT"}],
+                    },
+                    "structured_output": {"severity": "critical"},
+                },
+            },
+            "crew2_results": {
+                "portfolio_analysis": {
+                    "structured_output": {"severity": "medium"},
+                },
+                "market_intelligence": {
+                    "structured_output": {"severity": "low"},
+                },
+                "customer_context": {
+                    "consistency_label": "review",
+                    "structured_output": {"severity": "medium"},
+                },
+            },
+        }
+    )
+
+    assert payload["agent"] == "AlertIntake"
+    assert payload["alert_type"] == "portfolio_review"
+    assert payload["prechecks"]["highest_upstream_severity"] == "critical"
+    assert payload["prechecks"]["compliance_hits"] == 1
+    assert payload["prechecks"]["customer_consistency"] == "review"
+    assert payload["priority_tier"] == "P1"
+    assert payload["escalation_recommendation"] == "Yes"
+    assert payload["structured_output"]["severity"] == "critical"
 
 
 def test_customer_context_profile_includes_prechecks_and_structured_output():
@@ -201,6 +248,9 @@ def test_customer_context_profile_includes_prechecks_and_structured_output():
     assert payload["agent"] == "CustomerContext"
     assert payload["prechecks"]["profile_richness"] == "high"
     assert payload["structured_output"]["severity"] == "high"
+    assert payload["behavior_profile"]
+    assert payload["consistency_score"] <= 100
+    assert payload["consistency_label"] in {"consistent", "review", "inconsistent"}
     assert payload["structured_output"]["recommended_actions"]
 
 
@@ -215,4 +265,7 @@ def test_escalation_evaluation_includes_prechecks_and_structured_output():
     assert payload["needs_escalation"] is True
     assert payload["prechecks"]["risk_score"] == 88
     assert payload["structured_output"]["severity"] == "critical"
+    assert payload["action_recommendation"] == "Report"
+    assert payload["priority_tier"] == "P1"
+    assert payload["evidence_portfolio"]
     assert payload["structured_output"]["recommended_actions"]

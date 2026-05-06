@@ -1,6 +1,6 @@
 # FinGuard PRD
 
-Last updated: 2026-04-25
+Last updated: 2026-05-06
 
 ## 1. Product Definition
 
@@ -48,7 +48,7 @@ The core differentiator is the visible multi-agent AI pipeline. Users can see wh
 6. Backend calls the AI system.
 7. AI system runs LangGraph and internal agents.
 8. Frontend shows progress while waiting.
-9. Final response returns `analysis_trace` and `crew_output`.
+9. Final response returns `analysis_trace`, `crew_output`, structured crew results, and top-level recommendation metadata.
 10. User reviews agent outputs, trace metadata, and final recommendation.
 
 Expected result:
@@ -126,7 +126,9 @@ Requirements:
 
 - Run portfolio review through backend and AI system.
 - Return final analysis text.
-- Return `analysis_trace` with node, crew, agent, status, duration, and output.
+- Return `analysis_trace` with node, crew, agent, status, duration, output, structured summary, evidence references, and fallback metadata.
+- Return structured `crew1_results`, `crew2_results`, and `crew3_results`.
+- Return top-level action recommendation, priority tier, escalation recommendation, and evidence summary.
 - Show agent trace in frontend.
 - Preserve stable response shape for frontend compatibility.
 

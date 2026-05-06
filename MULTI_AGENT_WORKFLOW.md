@@ -1,5 +1,7 @@
 # FinGuard Multi-Agent Logic And Strategy
 
+Canonical report-alignment target: [docs/AGENT_ALIGNMENT_TARGET.md](docs/AGENT_ALIGNMENT_TARGET.md)
+
 FinGuard uses a nine-agent analysis strategy. The system splits a portfolio review into three logical crews, then merges their findings into one analyst-facing result.
 
 ## Core Strategy
@@ -37,13 +39,16 @@ Portfolio + Transactions
   -> Final Multi-Agent Analysis
 ```
 
-Each crew writes its result into shared state:
+Each crew writes both presentation text and structured artifacts into shared state:
 
 - `crew1_output`
 - `crew2_output`
 - `crew3_output`
+- `crew1_results`
+- `crew2_results`
+- `crew3_results`
 
-The final response combines those outputs into one review.
+The final response combines those outputs into one review and also returns the structured crew result blocks, top-level recommendation fields, evidence summary, and enriched `analysis_trace`.
 
 ## Crew 1: Risk Analysis
 
