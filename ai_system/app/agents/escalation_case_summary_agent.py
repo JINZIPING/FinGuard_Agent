@@ -109,6 +109,58 @@ def _actions_for_severity(severity: str) -> list[str]:
     return ["Continue standard case monitoring and document closure rationale."]
 
 
+def _priority_tier_for_severity(severity: str) -> str:
+    return {
+        "critical": "P1",
+        "high": "P2",
+        "medium": "P3",
+        "low": "P4",
+        "unknown": "P4",
+    }.get(severity, "P4")
+
+
+def _action_recommendation(prechecks: dict, severity: str) -> str:
+    if severity == "critical" and prechecks.get("regulatory_hints"):
+        return "Report"
+    if severity in {"critical", "high"}:
+        return "Escalate"
+    return "Decline"
+
+
+def _evidence_portfolio(
+    case_or_incident: dict | None, severity_factors: dict | None, prechecks: dict
+) -> list[str]:
+    evidence: list[str] = []
+    if prechecks.get("risk_score") is not None:
+        evidence.append(f"Risk score: {prechecks['risk_score']}")
+    if prechecks.get("regulatory_hints"):
+        evidence.append(
+            "Regulatory markers: " + ", ".join(sorted(prechecks["regulatory_hints"]))
+        )
+    if prechecks.get("urgency_hints"):
+        evidence.append(
+            "Urgency markers: " + ", ".join(sorted(prechecks["urgency_hints"]))
+        )
+    if prechecks.get("customer_impact"):
+        evidence.append("Customer impact indicators were identified.")
+    if prechecks.get("related_count"):
+        evidence.append(f"Related cases reviewed: {prechecks['related_count']}")
+    if not evidence:
+        case_or_incident = case_or_incident or {}
+        severity_factors = severity_factors or {}
+        evidence.append(
+            "Case context reviewed: "
+            + ", ".join(
+                sorted(
+                    str(key)
+                    for key in {**case_or_incident, **severity_factors}.keys()
+                    if key
+                )
+            )
+        )
+    return evidence[:5]
+
+
 def evaluate_escalation_need(incident: dict, severity_factors: dict) -> dict:
     prechecks = _escalation_prechecks(incident, severity_factors)
     prompt = f"""Evaluate if this incident requires escalation:
@@ -129,11 +181,16 @@ Evaluate severity, regulatory implications, customer impact, urgency, target tea
     evaluation = result or "Escalation evaluation unavailable."
     severity = _severity_from_prechecks(prechecks, evaluation)
     needs_escalation = severity in {"critical", "high"} or "escalat" in evaluation.lower()
+    action_recommendation = _action_recommendation(prechecks, severity)
+    evidence_portfolio = _evidence_portfolio(incident, severity_factors, prechecks)
     return {
         "agent": "EscalationCaseSummary",
         "timestamp": _timestamp(),
         "incident_id": incident.get("id"),
         "needs_escalation": needs_escalation,
+        "action_recommendation": action_recommendation,
+        "priority_tier": _priority_tier_for_severity(severity),
+        "evidence_portfolio": evidence_portfolio,
         "evaluation": evaluation,
         "prechecks": prechecks,
         "structured_output": build_structured_output(
@@ -144,7 +201,10 @@ Evaluate severity, regulatory implications, customer impact, urgency, target tea
             or prechecks["urgency_hints"]
             or [f"Risk score: {prechecks['risk_score']}"],
             recommended_actions=_actions_for_severity(severity),
-            follow_up=["Reassess escalation if new evidence or SLA changes appear."],
+            follow_up=[
+                f"Action recommendation: {action_recommendation}.",
+                "Reassess escalation if new evidence or SLA changes appear.",
+            ],
             raw_text=evaluation,
         ),
     }
@@ -175,12 +235,21 @@ Summarize overview, timeline, key facts, decisions, current status, open items, 
     result = chat(prompt)
     summary = result or "Case summary unavailable."
     severity = _severity_from_prechecks(prechecks, summary)
+    action_recommendation = _action_recommendation(prechecks, severity)
+    evidence_portfolio = _evidence_portfolio(
+        case_data,
+        {"interaction_count": len(interactions), "decision_count": len(decisions)},
+        prechecks,
+    )
     return {
         "agent": "EscalationCaseSummary",
         "timestamp": _timestamp(),
         "case_id": case_data.get("id"),
         "summary": summary,
         "ready_for_handoff": True,
+        "action_recommendation": action_recommendation,
+        "priority_tier": _priority_tier_for_severity(severity),
+        "evidence_portfolio": evidence_portfolio,
         "prechecks": prechecks,
         "structured_output": build_structured_output(
             summary=_summary_from_text(summary, "Case summary unavailable."),
@@ -222,6 +291,8 @@ Tailor facts, evidence, timeline, specialist questions, regulatory notes, and ne
         "target_team": target_team,
         "escalation_package": package,
         "prepared": True,
+        "priority_tier": _priority_tier_for_severity(severity),
+        "evidence_portfolio": _evidence_portfolio(case, {"target_team": target_team}, prechecks),
         "prechecks": prechecks,
         "structured_output": build_structured_output(
             summary=_summary_from_text(package, "Escalation package unavailable."),

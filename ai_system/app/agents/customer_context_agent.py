@@ -111,8 +111,43 @@ def _actions_for_severity(severity: str) -> list[str]:
     return ["Use the profile for routine context enrichment."]
 
 
+def _behavioral_flags(profile_data: dict) -> list[str]:
+    raw_flags = (
+        profile_data.get("behavioral_flags")
+        or profile_data.get("behavior_flags")
+        or profile_data.get("flags")
+        or []
+    )
+    if isinstance(raw_flags, str):
+        return [raw_flags] if raw_flags.strip() else []
+    return [str(flag).strip() for flag in raw_flags if str(flag).strip()]
+
+
+def _consistency_score(prechecks: dict, profile_data: dict) -> tuple[int, str]:
+    score = 85
+    if prechecks.get("missing_customer_id"):
+        score -= 15
+
+    richness = prechecks.get("profile_richness")
+    if richness == "medium":
+        score -= 10
+    elif richness == "low":
+        score -= 25
+
+    score -= min(30, len(prechecks.get("risk_indicators", [])) * 10)
+    score -= min(20, len(_behavioral_flags(profile_data)) * 10)
+    score = max(0, min(100, score))
+
+    if score >= 75:
+        return score, "consistent"
+    if score >= 50:
+        return score, "review"
+    return score, "inconsistent"
+
+
 def build_customer_profile(customer_id: str, profile_data: dict) -> dict:
     prechecks = _profile_prechecks(customer_id, profile_data)
+    consistency_score, consistency_label = _consistency_score(prechecks, profile_data)
     prompt = f"""You are a customer context specialist. Build a comprehensive profile:
 
 Customer ID: {customer_id}
@@ -133,16 +168,26 @@ Summarize financial situation, risk tolerance, goals, constraints, and downstrea
         "timestamp": _timestamp(),
         "customer_id": customer_id,
         "profile": profile,
+        "behavior_profile": profile,
         "profile_complete": True,
+        "behavioral_flags": _behavioral_flags(profile_data),
+        "consistency_score": consistency_score,
+        "consistency_label": consistency_label,
         "prechecks": prechecks,
         "structured_output": build_structured_output(
             summary=_summary_from_text(profile, "Customer profile unavailable."),
             severity=severity,
             confidence=_confidence_from_prechecks(prechecks),
             key_factors=prechecks["risk_indicators"]
-            or [f"Profile richness: {prechecks['profile_richness']}"],
+            or [
+                f"Profile richness: {prechecks['profile_richness']}",
+                f"Consistency label: {consistency_label}",
+            ],
             recommended_actions=_actions_for_severity(severity),
-            follow_up=["Refresh customer context when KYC or portfolio data changes."],
+            follow_up=[
+                f"Behavior consistency score: {consistency_score}/100.",
+                "Refresh customer context when KYC or portfolio data changes.",
+            ],
             raw_text=profile,
         ),
     }

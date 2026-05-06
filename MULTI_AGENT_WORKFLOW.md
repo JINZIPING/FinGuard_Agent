@@ -1,5 +1,7 @@
 # FinGuard Multi-Agent Logic And Strategy
 
+Canonical report-alignment target: [docs/AGENT_ALIGNMENT_TARGET.md](docs/AGENT_ALIGNMENT_TARGET.md)
+
 FinGuard uses a nine-agent analysis strategy. The system splits a portfolio review into three logical crews, then merges their findings into one analyst-facing result.
 
 ## Core Strategy

@@ -197,11 +197,14 @@ def _actions_for_severity(severity: str) -> list[str]:
     return ["Continue routine compliance monitoring."]
 
 
-def review_transactions_compliance(transactions: list[dict]) -> dict:
+def review_transactions_compliance(
+    transactions: list[dict], customer_context: dict | None = None
+) -> dict:
     prechecks = _compliance_prechecks(transactions)
     prompt = (
         "You are a compliance officer. Review these transactions for regulatory compliance.\n\n"
         f"Transactions:\n{json.dumps(transactions[:20], indent=2)}\n\n"
+        f"Customer Context:\n{json.dumps(customer_context or {}, indent=2)}\n\n"
         f"Deterministic Prechecks:\n{json.dumps(prechecks, indent=2)}\n\n"
         f"{_compliance_contract('analyst')}\n"
         "Check trading-policy, reporting, tax, and AML/KYC concerns without overstating certainty."
@@ -228,9 +231,14 @@ def review_transactions_compliance(transactions: list[dict]) -> dict:
     }
 
 
-def invoke(portfolio: dict, transactions: list[dict], mode: str = "quick") -> dict:
+def invoke(
+    portfolio: dict,
+    transactions: list[dict],
+    mode: str = "quick",
+    customer_context: dict | None = None,
+) -> dict:
     if mode == "full":
-        result = review_transactions_compliance(transactions)
+        result = review_transactions_compliance(transactions, customer_context)
         return {
             "agent": "compliance",
             "mode": mode,
@@ -268,6 +276,8 @@ def invoke(portfolio: dict, transactions: list[dict], mode: str = "quick") -> di
 class ComplianceAgent:
     AGENT_DOMAIN = "compliance"
 
-    def review_transactions_compliance(self, transactions: list[dict]) -> dict:
-        return review_transactions_compliance(transactions)
+    def review_transactions_compliance(
+        self, transactions: list[dict], customer_context: dict | None = None
+    ) -> dict:
+        return review_transactions_compliance(transactions, customer_context)
 

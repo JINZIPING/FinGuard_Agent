@@ -281,7 +281,11 @@ def score_transaction_risk(
     return _score_transaction_risk(transaction, customer_profile)
 
 
-def assess_portfolio_risk(portfolio_data: dict, market_conditions: dict) -> dict:
+def assess_portfolio_risk(
+    portfolio_data: dict,
+    market_conditions: dict,
+    customer_context: dict | None = None,
+) -> dict:
     prompt = f"""You are a risk assessment expert. Perform comprehensive portfolio risk assessment:
 
 Portfolio:
@@ -289,6 +293,9 @@ Portfolio:
 
 Market Conditions:
 {json.dumps(market_conditions, indent=2)}
+
+Customer Context:
+{json.dumps(customer_context or {}, indent=2)}
 
 {_risk_contract("analyst")}
 
@@ -647,8 +654,15 @@ def invoke(portfolio: dict, transactions: list[dict], mode: str = "quick") -> di
 class RiskAssessmentAgent:
     AGENT_DOMAIN = "risk_assessment"
 
-    def assess_portfolio_risk(self, portfolio_data: dict, market_conditions: dict) -> dict:
-        return assess_portfolio_risk(portfolio_data, market_conditions)
+    def assess_portfolio_risk(
+        self,
+        portfolio_data: dict,
+        market_conditions: dict,
+        customer_context: dict | None = None,
+    ) -> dict:
+        return assess_portfolio_risk(
+            portfolio_data, market_conditions, customer_context
+        )
 
     def score_transaction_risk(self, transaction: dict, customer_profile: dict | None = None) -> dict:
         return score_transaction_risk(transaction, customer_profile)
