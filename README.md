@@ -20,7 +20,9 @@ Frontend (React analyst UI)
 - Portfolio APIs and AI analysis flow.
 - AI Analysis UI with portfolio dropdown.
 - LangGraph-backed multi-agent review.
-- Returned `analysis_trace` with node, crew, agent, status, duration, and output.
+- Returned `analysis_trace` with node, crew, agent, status, duration, structured summary, evidence refs, and fallback metadata.
+- Structured `crew1_results`, `crew2_results`, and `crew3_results` in the final response.
+- Top-level final recommendation, priority tier, and evidence summary in the final response.
 - Market sentiment analysis.
 - Case, audit, SAR, search, auth, transaction, alert, and recommendation APIs.
 - Docker Compose local stack.

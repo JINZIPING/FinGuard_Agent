@@ -15,7 +15,7 @@ class _FallbackGraph:
             next_state = nodes.run_quick_recommendation(next_state)
             return nodes.compile_quick_response(next_state)
 
-        next_state = nodes.run_full_crews_parallel(next_state)
+        next_state = nodes.run_full_crews(next_state)
         return nodes.compile_full_response(next_state)
 
 

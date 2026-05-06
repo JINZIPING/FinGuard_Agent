@@ -17,6 +17,11 @@ from ai_system.app.agents import (
 )
 from ai_system.app.analysis_utils import ml_score_transactions
 from ai_system.app.llm import get_last_thinking, is_rate_limit_error
+from ai_system.langgraph.contracts import (
+    CONTRACT_VERSION,
+    normalize_agent_artifact,
+    serialize_agent_artifact,
+)
 from ai_system.langgraph.state import PortfolioAnalysisState
 
 try:
@@ -58,15 +63,19 @@ def _first_text(value: object, fallback: str) -> str:
 def _emit_llm_thinking(state: PortfolioAnalysisState, node: str, agent_name: str) -> None:
     thinking = get_last_thinking()
     if thinking:
-        _append_trace(state, {
-            "type": "thinking",
-            "node": node,
-            "agent_name": agent_name,
-            "step": 1,
-            "analysis": "LLM Reasoning",
-            "details": thinking,
-            "status": "in_progress",
-        })
+        _append_trace(
+            state,
+            {
+                "type": "thinking",
+                "node": node,
+                "agent": agent_name,
+                "name": agent_name,
+                "step": 1,
+                "analysis_type": "LLM Reasoning",
+                "details": thinking,
+                "status": "in_progress",
+            },
+        )
 
 
 def _elapsed_ms(start: float) -> int:
@@ -111,7 +120,47 @@ def _structured_signal_summary(
 
 def _append_trace(state: PortfolioAnalysisState, event: dict) -> None:
     trace = state.setdefault("analysis_trace", [])
-    trace.append({"sequence": len(trace) + 1, **event})
+    trace.append(
+        {
+            "sequence": len(trace) + 1,
+            "contract_version": CONTRACT_VERSION,
+            "agent": None,
+            "crew": None,
+            "structured_summary": None,
+            "severity": None,
+            "confidence": None,
+            "evidence_refs": [],
+            "fallback_used": False,
+            "fallback_reason": None,
+            "rate_limited": False,
+            "data_basis": None,
+            **event,
+        }
+    )
+
+
+def _artifact_trace_fields(
+    payload: dict | None,
+    *,
+    evidence_refs: list[str] | None = None,
+    fallback_reason: str | None = None,
+) -> dict:
+    artifact = payload or {}
+    structured = artifact.get("structured_output", {}) or {}
+    return {
+        "structured_summary": structured.get("summary"),
+        "severity": structured.get("severity"),
+        "confidence": structured.get("confidence"),
+        "evidence_refs": evidence_refs or [],
+        "fallback_used": bool(
+            artifact.get("rate_limited")
+            or artifact.get("success") is False
+            or fallback_reason
+        ),
+        "fallback_reason": fallback_reason,
+        "rate_limited": bool(artifact.get("rate_limited")),
+        "data_basis": artifact.get("data_basis"),
+    }
 
 
 def _terminal_event(
@@ -161,6 +210,9 @@ def _agent_event(
     body: str,
     duration_ms: int,
     status: str = "completed",
+    payload: dict | None = None,
+    evidence_refs: list[str] | None = None,
+    fallback_reason: str | None = None,
 ) -> None:
     _append_trace(
         state,
@@ -168,10 +220,16 @@ def _agent_event(
             "type": "agent",
             "node": node,
             "crew": crew,
+            "agent": name,
             "name": name,
             "status": status,
             "duration_ms": duration_ms,
             "body": body,
+            **_artifact_trace_fields(
+                payload,
+                evidence_refs=evidence_refs,
+                fallback_reason=fallback_reason,
+            ),
         },
     )
 
@@ -191,7 +249,8 @@ def _thinking_step_event(
         {
             "type": "thinking",
             "node": node,
-            "agent_name": agent_name,
+            "agent": agent_name,
+            "name": agent_name,
             "step": step_num,
             "analysis_type": analysis_type,
             "details": details,
@@ -554,12 +613,14 @@ def run_quick_recommendation(state: PortfolioAnalysisState) -> PortfolioAnalysis
         name="Risk Assessment Agent",
         body=state["response"].get("recommendation", str(state["response"])),
         duration_ms=_elapsed_ms(start),
+        payload=state["response"],
+        evidence_refs=["response.structured_output"],
     )
     return state
 
 
 @traceable(name="langgraph_run_full_crews", run_type="chain")
-def run_full_crews_parallel(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
+def run_full_crews(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     """
     Legacy-named full-run entrypoint.
 
@@ -598,21 +659,31 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
 
     try:
         ml_scores = [risk.score_transaction(txn) for txn in transactions[:10]]
-        risk_assessment = risk.assess_portfolio_risk(
+        risk_assessment = normalize_agent_artifact(
+            risk.assess_portfolio_risk(
             portfolio_data,
             {"volatility": "current market conditions"},
             customer_context=customer_profile,
+            ),
+            default_agent="RiskAssessment",
+            primary_text_keys=("risk_analysis", "summary", "analysis"),
         )
         _emit_llm_thinking(state, "run_full_crew_one", "Risk Assessment Agent")
-        fraud_assessment = risk.detect_fraud_risk(
-            transactions, portfolio_data, ml_scores
+        fraud_assessment = normalize_agent_artifact(
+            risk.detect_fraud_risk(transactions, portfolio_data, ml_scores),
+            default_agent="RiskDetector",
+            primary_text_keys=("assessment", "summary", "analysis"),
         )
         _emit_llm_thinking(state, "run_full_crew_one", "Risk Detection Agent")
-        compliance_payload = compliance.invoke(
-            portfolio_data,
-            transactions,
-            mode="full",
-            customer_context=customer_profile,
+        compliance_payload = normalize_agent_artifact(
+            compliance.invoke(
+                portfolio_data,
+                transactions,
+                mode="full",
+                customer_context=customer_profile,
+            ),
+            default_agent="Compliance",
+            primary_text_keys=("summary", "analysis"),
         )
         compliance_structured = compliance_payload.get("structured_output", {}) or {}
         compliance_prechecks = compliance_payload.get("prechecks", {}) or {}
@@ -711,6 +782,8 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
             name="Risk Assessment Agent",
             body=risk_assessment["risk_analysis"],
             duration_ms=duration_ms,
+            payload=risk_assessment,
+            evidence_refs=["crew1_results.risk_assessment"],
         )
         _agent_event(
             state,
@@ -719,6 +792,8 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
             name="Risk Detection Agent",
             body=fraud_assessment["assessment"],
             duration_ms=duration_ms,
+            payload=fraud_assessment,
+            evidence_refs=["crew1_results.risk_detection"],
         )
         _agent_event(
             state,
@@ -727,6 +802,8 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
             name="Compliance Agent",
             body=compliance_result,
             duration_ms=duration_ms,
+            payload=compliance_payload,
+            evidence_refs=["crew1_results.compliance"],
         )
         return state
     except Exception as exc:
@@ -745,6 +822,7 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
                 body=state["crew1_output"],
                 duration_ms=_elapsed_ms(start),
                 status="rate_limited",
+                fallback_reason="rate_limit",
             )
             return state
 
@@ -759,6 +837,7 @@ def run_full_crew_one(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
             body=state["crew1_output"],
             duration_ms=_elapsed_ms(start),
             status="failed",
+            fallback_reason="crew_failure",
         )
         return state
 
@@ -782,11 +861,19 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
     start = perf_counter()
 
     try:
-        portfolio_analysis = portfolio.analyze_portfolio(portfolio_data)
+        portfolio_analysis = normalize_agent_artifact(
+            portfolio.analyze_portfolio(portfolio_data),
+            default_agent="PortfolioAnalyzer",
+            primary_text_keys=("analysis", "summary"),
+        )
         _emit_llm_thinking(state, "run_full_crew_two", "Portfolio Analysis Agent")
-        market_payload = market.analyze_sentiment(
-            symbols or fallback_symbols,
-            detail_level="short",
+        market_payload = normalize_agent_artifact(
+            market.analyze_sentiment(
+                symbols or fallback_symbols,
+                detail_level="short",
+            ),
+            default_agent="MarketIntelligence",
+            primary_text_keys=("sentiment_analysis", "summary", "analysis"),
         )
         _emit_llm_thinking(state, "run_full_crew_two", "Market Intelligence Agent")
         market_structured = market_payload.get("structured_output", {}) or {}
@@ -828,8 +915,10 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
         customer_profile = customer_context_seed.get("profile_data") or {}
         if not customer_profile:
             _, customer_profile = _derive_customer_inputs(portfolio_data, transactions)
-        customer_payload = customer_context.build_customer_profile(
-            customer_id, customer_profile
+        customer_payload = normalize_agent_artifact(
+            customer_context.build_customer_profile(customer_id, customer_profile),
+            default_agent="CustomerContext",
+            primary_text_keys=("profile", "summary", "analysis"),
         )
         _emit_llm_thinking(state, "run_full_crew_two", "Customer Context Agent")
         customer_result = _summarize_customer_context(customer_payload)
@@ -866,6 +955,8 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
             name="Portfolio Analysis Agent",
             body=portfolio_analysis["analysis"],
             duration_ms=duration_ms,
+            payload=portfolio_analysis,
+            evidence_refs=["crew2_results.portfolio_analysis"],
         )
         _agent_event(
             state,
@@ -874,6 +965,8 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
             name="Market Intelligence Agent",
             body=market_result,
             duration_ms=duration_ms,
+            payload=market_payload,
+            evidence_refs=["crew2_results.market_intelligence"],
         )
         _agent_event(
             state,
@@ -882,6 +975,8 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
             name="Customer Context Agent",
             body=customer_result,
             duration_ms=duration_ms,
+            payload=customer_payload,
+            evidence_refs=["crew2_results.customer_context"],
         )
         return state
     except Exception as exc:
@@ -898,6 +993,7 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
                 body=state["crew2_output"],
                 duration_ms=_elapsed_ms(start),
                 status="rate_limited",
+                fallback_reason="rate_limit",
             )
             return state
 
@@ -912,6 +1008,7 @@ def run_full_crew_two(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
             body=state["crew2_output"],
             duration_ms=_elapsed_ms(start),
             status="failed",
+            fallback_reason="crew_failure",
         )
         return state
 
@@ -951,7 +1048,8 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
         portfolio_payload = crew2_results.get("portfolio_analysis", {}) or {}
         market_payload = crew2_results.get("market_intelligence", {}) or {}
 
-        alert_payload = alert_intake.process_accumulated_findings(
+        alert_payload = normalize_agent_artifact(
+            alert_intake.process_accumulated_findings(
             {
                 "request_id": state.get("request_id"),
                 "portfolio": {
@@ -966,14 +1064,21 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
                 "crew1_results": crew1_results,
                 "crew2_results": crew2_results,
             }
+            ),
+            default_agent="AlertIntake",
+            primary_text_keys=("analysis", "summary"),
         )
         _emit_llm_thinking(state, "run_full_crew_three", "Alert Intake Agent")
         explanation_input = _build_explanation_input(
             state, alert_payload, crew1_results, crew2_results
         )
-        summary = explanation.summarize_analysis(
-            explanation_input,
-            "medium",
+        summary = normalize_agent_artifact(
+            explanation.summarize_analysis(
+                explanation_input,
+                "medium",
+            ),
+            default_agent="Explanation",
+            primary_text_keys=("summary", "analysis"),
         )
         _emit_llm_thinking(state, "run_full_crew_three", "Explanation Agent")
         case_data, severity_factors, interactions, decisions = (
@@ -988,33 +1093,41 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
                 compliance_rule_hits=compliance_rule_hits,
             )
         )
-        escalation_evaluation = escalation.evaluate_escalation_need(
-            case_data,
-            severity_factors,
+        escalation_evaluation = normalize_agent_artifact(
+            escalation.evaluate_escalation_need(
+                case_data,
+                severity_factors,
+            ),
+            default_agent="EscalationCaseSummary",
+            primary_text_keys=("evaluation", "summary", "analysis"),
         )
         _emit_llm_thinking(state, "run_full_crew_three", "Escalation Agent")
-        case_summary = escalation.generate_case_summary(
-            {
-                **case_data,
-                "priority_tier": escalation_evaluation.get("priority_tier"),
-                "action_recommendation": escalation_evaluation.get(
-                    "action_recommendation"
-                ),
-            },
-            interactions,
-            [
-                *decisions,
+        case_summary = normalize_agent_artifact(
+            escalation.generate_case_summary(
                 {
-                    "agent": "escalation_evaluation",
+                    **case_data,
+                    "priority_tier": escalation_evaluation.get("priority_tier"),
                     "action_recommendation": escalation_evaluation.get(
                         "action_recommendation"
                     ),
-                    "priority_tier": escalation_evaluation.get("priority_tier"),
-                    "structured_output": escalation_evaluation.get(
-                        "structured_output", {}
-                    ),
                 },
-            ],
+                interactions,
+                [
+                    *decisions,
+                    {
+                        "agent": "escalation_evaluation",
+                        "action_recommendation": escalation_evaluation.get(
+                            "action_recommendation"
+                        ),
+                        "priority_tier": escalation_evaluation.get("priority_tier"),
+                        "structured_output": escalation_evaluation.get(
+                            "structured_output", {}
+                        ),
+                    },
+                ],
+            ),
+            default_agent="EscalationCaseSummary",
+            primary_text_keys=("summary", "analysis"),
         )
         _emit_llm_thinking(state, "run_full_crew_three", "Escalation Agent")
         alert_result = _summarize_alert_intake(alert_payload)
@@ -1046,6 +1159,8 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
             name="Alert Intake Agent",
             body=alert_result,
             duration_ms=duration_ms,
+            payload=alert_payload,
+            evidence_refs=["crew3_results.alert_intake"],
         )
         _agent_event(
             state,
@@ -1054,6 +1169,16 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
             name="Explanation Agent",
             body=summary["summary"],
             duration_ms=duration_ms,
+            payload=summary,
+            evidence_refs=[
+                "crew1_results.risk_assessment",
+                "crew1_results.risk_detection",
+                "crew1_results.compliance",
+                "crew2_results.portfolio_analysis",
+                "crew2_results.market_intelligence",
+                "crew2_results.customer_context",
+                "crew3_results.alert_intake",
+            ],
         )
         _agent_event(
             state,
@@ -1062,6 +1187,11 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
             name="Escalation Agent",
             body=escalation_result,
             duration_ms=duration_ms,
+            payload=case_summary,
+            evidence_refs=[
+                "crew3_results.escalation_evaluation",
+                "crew3_results.escalation_case_summary",
+            ],
         )
         return state
     except Exception as exc:
@@ -1078,6 +1208,7 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
                 body=state["crew3_output"],
                 duration_ms=_elapsed_ms(start),
                 status="rate_limited",
+                fallback_reason="rate_limit",
             )
             return state
 
@@ -1092,6 +1223,7 @@ def run_full_crew_three(state: PortfolioAnalysisState) -> PortfolioAnalysisState
             body=state["crew3_output"],
             duration_ms=_elapsed_ms(start),
             status="failed",
+            fallback_reason="crew_failure",
         )
         return state
 
@@ -1173,7 +1305,7 @@ def compile_full_response(state: PortfolioAnalysisState) -> PortfolioAnalysisSta
         "timestamp": state.get("request_id"),
         "portfolio_id": portfolio.get("id"),
         "crew_output": (
-            "## 📊 Multi-Crew Portfolio Analysis (3 Parallel Crews)\n\n"
+            "## 📊 Multi-Crew Portfolio Analysis (3 Sequential Crews)\n\n"
             f"### Crew 1: Risk Analysis\n{state.get('crew1_output', '')}\n\n"
             f"### Crew 2: Portfolio Analysis\n{state.get('crew2_output', '')}\n\n"
             f"### Crew 3: Summary & Escalation\n{state.get('crew3_output', '')}\n\n"
@@ -1261,3 +1393,133 @@ def compile_full_response(state: PortfolioAnalysisState) -> PortfolioAnalysisSta
 
 def choose_analysis_route(state: PortfolioAnalysisState) -> str:
     return state.get("route", "quick")
+
+
+def _serialize_crew_results(crew_results: dict | None) -> dict:
+    results = crew_results or {}
+    serialized: dict[str, object] = {}
+    for key, value in results.items():
+        if isinstance(value, dict) and "structured_output" in value:
+            serialized[key] = serialize_agent_artifact(value)
+        else:
+            serialized[key] = value
+    return serialized
+
+
+def _final_action_metadata(state: PortfolioAnalysisState) -> dict[str, object]:
+    crew3_results = state.get("crew3_results") or {}
+    escalation_eval = crew3_results.get("escalation_evaluation", {}) or {}
+    escalation_case = crew3_results.get("escalation_case_summary", {}) or {}
+    alert_intake_payload = crew3_results.get("alert_intake", {}) or {}
+    evidence_portfolio = (
+        escalation_eval.get("evidence_portfolio")
+        or escalation_case.get("evidence_portfolio")
+        or []
+    )
+    return {
+        "final_action_recommendation": escalation_eval.get("action_recommendation"),
+        "final_priority_tier": escalation_eval.get("priority_tier")
+        or alert_intake_payload.get("priority_tier"),
+        "final_escalation_recommendation": alert_intake_payload.get(
+            "escalation_recommendation"
+        ),
+        "evidence_summary": evidence_portfolio[:3],
+        "evidence_portfolio": evidence_portfolio,
+    }
+
+
+@traceable(name="langgraph_compile_quick_response", run_type="chain")
+def compile_quick_response(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
+    response = state.get("response") or {}
+    response["analysis_trace"] = state.get("analysis_trace", [])
+    response["langgraph_route"] = state.get("route", "quick")
+    response["response_contract_version"] = CONTRACT_VERSION
+    state["response"] = response
+    return state
+
+
+@traceable(name="langgraph_compile_full_response", run_type="chain")
+def compile_full_response(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
+    portfolio = state.get("portfolio") or {}
+    ml_summary = state.get("ml_summary", "")
+    crews_run = state.get("crews_run", 0)
+    final_action = _final_action_metadata(state)
+
+    if state.get("rate_limited"):
+        if crews_run <= 1:
+            crew_output = (
+                "## Portfolio Analysis - Rate Limited\n\n"
+                "Model API rate limit reached.\n\n"
+                "Wait 30-60 seconds and retry, increase the model service quota, "
+                "or switch to the quick recommendation path.\n\n"
+                f"Current analysis status:\n{state.get('crew1_output', '')}\n\n"
+                f"### ML Pre-Screening (Always Available)\n{ml_summary}"
+            )
+        elif crews_run == 2:
+            crew_output = (
+                "## Portfolio Analysis - Rate Limited (Crew 2)\n\n"
+                "Model API rate limit reached during Crew 2.\n\n"
+                "Wait 30-60 seconds and retry, increase the model service quota, "
+                "or switch to the quick recommendation path.\n\n"
+                "Completed analysis:\n"
+                f"- Crew 1 (Risk): {str(state.get('crew1_output', ''))[:100]}...\n"
+                f"- Crew 2 (Portfolio): {str(state.get('crew2_output', ''))[:100]}...\n\n"
+                f"### ML Pre-Screening (Always Available)\n{ml_summary}"
+            )
+        else:
+            crew_output = (
+                "## Portfolio Analysis - Partial (Rate Limited)\n\n"
+                "Model API rate limit reached.\n\n"
+                "Wait 30-60 seconds and retry, increase the model service quota, "
+                "or switch to the quick recommendation path.\n\n"
+                "Partial analysis completed:\n"
+                f"- Crew 1 (Risk): {str(state.get('crew1_output', ''))[:100]}...\n"
+                f"- Crew 2 (Portfolio): {str(state.get('crew2_output', ''))[:100]}...\n"
+                f"- Crew 3 (Summary): {str(state.get('crew3_output', ''))[:100]}...\n\n"
+                f"### ML Pre-Screening (Always Available)\n{ml_summary}"
+            )
+
+        state["response"] = {
+            "timestamp": state.get("request_id"),
+            "portfolio_id": portfolio.get("id"),
+            "crew_output": crew_output,
+            "agents_used": 9,
+            "crews_run": crews_run,
+            "rate_limited": True,
+            "langgraph_route": state.get("route", "full"),
+            "analysis_trace": state.get("analysis_trace", []),
+            "crew1_results": _serialize_crew_results(state.get("crew1_results")),
+            "crew2_results": _serialize_crew_results(state.get("crew2_results")),
+            "crew3_results": _serialize_crew_results(state.get("crew3_results")),
+            "response_contract_version": CONTRACT_VERSION,
+            **final_action,
+        }
+        return state
+
+    state["response"] = {
+        "timestamp": state.get("request_id"),
+        "portfolio_id": portfolio.get("id"),
+        "crew_output": (
+            "## Multi-Crew Portfolio Analysis (3 Sequential Crews)\n\n"
+            f"### Crew 1: Risk Analysis\n{state.get('crew1_output', '')}\n\n"
+            f"### Crew 2: Portfolio Analysis\n{state.get('crew2_output', '')}\n\n"
+            f"### Crew 3: Summary & Escalation\n{state.get('crew3_output', '')}\n\n"
+            f"### ML Pre-Screening\n{ml_summary}"
+        ),
+        "agents_used": 9,
+        "crews_run": 3,
+        "rate_limited": False,
+        "langgraph_route": state.get("route", "full"),
+        "analysis_trace": state.get("analysis_trace", []),
+        "crew1_results": _serialize_crew_results(state.get("crew1_results")),
+        "crew2_results": _serialize_crew_results(state.get("crew2_results")),
+        "crew3_results": _serialize_crew_results(state.get("crew3_results")),
+        "response_contract_version": CONTRACT_VERSION,
+        **final_action,
+    }
+    return state
+
+
+def run_full_crews_parallel(state: PortfolioAnalysisState) -> PortfolioAnalysisState:
+    """Compatibility alias for older imports and tests."""
+    return run_full_crews(state)

@@ -267,9 +267,14 @@ Each agent execution event should include at minimum:
 Optional but preferred where available:
 
 - thinking events
+- `contract_version`
+- `agent`
 - structured output snapshots
+- `severity`
+- `confidence`
 - evidence references
 - rate-limit or fallback indicators
+- `data_basis` metadata when an agent relied on non-live or partial context
 
 ## Canonical Response Payload Expectations
 
@@ -283,40 +288,36 @@ The final full-path response should include:
 - `rate_limited`
 - `langgraph_route`
 - `analysis_trace`
-
-Preferred future additions for stronger report alignment:
-
-- structured crew result blocks
-- final action recommendation as a top-level field
-- top-level evidence portfolio summary
+- `crew1_results`
+- `crew2_results`
+- `crew3_results`
+- `response_contract_version`
+- `final_action_recommendation`
+- `final_priority_tier`
+- `final_escalation_recommendation`
+- `evidence_summary`
+- `evidence_portfolio`
 
 ## Current Known Gaps Against This Target
 
-The major structural gaps have now been reduced substantially. The current remaining gaps are mostly in the final auditability and presentation layer rather than in basic cross-agent wiring.
+The previously identified report-alignment gaps in the LangGraph full-path workflow are now addressed in the current implementation.
 
-### Already Aligned Or Largely Aligned
+### Aligned In The Current Implementation
 
-The following report-vs-code gaps have been addressed in the current implementation:
+1. Customer Context creates a request-scoped context seed and influences Crew 1 consumers.
+2. Alert Intake consumes accumulated upstream findings rather than only a reduced synthesized mini-alert.
+3. Explanation receives structured upstream evidence rather than relying only on flattened crew summaries.
+4. Escalation receives a richer structured dossier assembled from upstream artifacts.
+5. Shared LangGraph crew handoffs use explicit typed contracts plus normalization helpers.
+6. `analysis_trace` now carries richer auditability fields, including structured summaries, evidence references, and fallback markers.
+7. The final response payload now returns structured crew result blocks, top-level action metadata, and evidence summaries alongside `crew_output`.
 
-1. Customer Context now creates a request-scoped context seed and influences Crew 1 consumers.
-2. Alert Intake now consumes accumulated upstream findings rather than only a reduced synthesized mini-alert.
-3. Explanation now receives structured upstream evidence rather than relying only on flattened crew summaries.
-4. Escalation now receives a richer structured dossier assembled from upstream artifacts.
-5. Shared LangGraph crew handoffs now use explicit typed contracts and stronger integration tests.
+### Remaining Maintenance Work
 
-### Remaining Gaps
+The remaining work is primarily operational rather than report-alignment debt:
 
-1. `analysis_trace` is still thinner than the report’s full traceability model.
-   The trace captures per-agent events, timing, and bodies, but it does not yet consistently expose structured evidence snapshots, fallback markers, and explicit evidence references per agent.
-
-2. The final response payload is still too presentation-heavy.
-   It primarily returns `crew_output` plus `analysis_trace`, but it does not yet expose structured `crew1_results`, `crew2_results`, `crew3_results`, a top-level final action recommendation, or a top-level evidence summary.
-
-3. Contract enforcement is typed but not fully runtime-enforced.
-   The repo now has typed contracts for inter-agent handoffs, but it still relies mostly on convention rather than shared validators or enforcement helpers that guarantee the full report-defined contract shape at runtime.
-
-4. The internal documentation set is not fully synchronized.
-   The alignment target, workflow doc, README, and implementation are closer now, but they still need a final consistency pass after the response and trace layers are finalized.
+1. Keep downstream docs and UI consumers synchronized as the response contract evolves.
+2. If needed, extend runtime validation beyond the core LangGraph full-path so debugging endpoints and future workflows enforce the same contract rigor.
 
 ## Acceptance Criteria For Full Alignment
 

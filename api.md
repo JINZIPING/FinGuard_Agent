@@ -1,6 +1,6 @@
 # FinGuard API Contract
 
-Last updated: 2026-04-25
+Last updated: 2026-05-06
 
 This is the concise frontend/backend contract. Keep it updated when route paths, payloads, auth, or response envelopes change.
 
@@ -93,16 +93,49 @@ POST /api/portfolios/{portfolio_id}/analyze
   "crews_run": 3,
   "rate_limited": false,
   "langgraph_route": "full",
+  "response_contract_version": "2026-05-06",
+  "final_action_recommendation": "Report",
+  "final_priority_tier": "P1",
+  "final_escalation_recommendation": "Yes",
+  "evidence_summary": ["Risk score: 88", "AML review"],
+  "evidence_portfolio": ["Risk score: 88", "AML review"],
+  "crew1_results": {
+    "risk_assessment": {
+      "agent": "RiskAssessment",
+      "timestamp": "2026-05-06T00:00:00+00:00",
+      "structured_output": {
+        "summary": "Risk assessment summary.",
+        "severity": "high",
+        "confidence": "medium",
+        "key_factors": ["Liquidity concentration"],
+        "recommended_actions": ["Review concentration."],
+        "follow_up": ["Monitor."],
+        "raw_text": "Risk assessment summary."
+      }
+    }
+  },
+  "crew2_results": {},
+  "crew3_results": {},
   "analysis_trace": [
     {
       "sequence": 1,
+      "contract_version": "2026-05-06",
       "type": "agent",
       "node": "run_full_crew_one",
       "crew": "Crew 1: Risk Analysis",
+      "agent": "Risk Detection Agent",
       "name": "Risk Detection Agent",
       "status": "completed",
       "duration_ms": 1200,
-      "body": "Agent output"
+      "body": "Agent output",
+      "structured_summary": "Fraud review summary.",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence_refs": ["crew1_results.risk_detection"],
+      "fallback_used": false,
+      "fallback_reason": null,
+      "rate_limited": false,
+      "data_basis": null
     }
   ]
 }

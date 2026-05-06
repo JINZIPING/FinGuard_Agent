@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ai_system.langgraph import nodes
+from ai_system.langgraph.contracts import CONTRACT_VERSION
 from ai_system.app import orchestrator
 from ai_system.app.schemas import PortfolioReviewRequest
 
@@ -693,3 +694,204 @@ def test_portfolio_review_request_defaults_and_nested_dump():
     assert request.portfolio.total_value == 0
     assert request.portfolio.assets[0].symbol == "AAPL"
     assert request.portfolio.model_dump()["assets"][0]["current_price"] == 200.0
+
+
+def test_compile_full_response_exposes_structured_results_and_final_metadata():
+    state = {
+        "request_id": "2026-05-06T00:00:00+00:00",
+        "route": "full",
+        "portfolio": {"id": 77, "name": "Demo"},
+        "ml_summary": "High/Critical: 1",
+        "crew1_output": "Crew 1 summary",
+        "crew2_output": "Crew 2 summary",
+        "crew3_output": "Crew 3 summary",
+        "analysis_trace": [{"sequence": 1, "type": "agent"}],
+        "crew1_results": {
+            "risk_assessment": {
+                "agent": "RiskAssessment",
+                "timestamp": "now",
+                "structured_output": {
+                    "summary": "Risk assessment summary.",
+                    "severity": "high",
+                    "confidence": "medium",
+                    "key_factors": ["Liquidity concentration"],
+                    "recommended_actions": ["Review concentration."],
+                    "follow_up": ["Monitor."],
+                    "raw_text": "Risk assessment summary.",
+                },
+            }
+        },
+        "crew2_results": {
+            "customer_context": {
+                "agent": "CustomerContext",
+                "timestamp": "now",
+                "consistency_label": "review",
+                "structured_output": {
+                    "summary": "Customer context summary.",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "key_factors": ["Behavior drift"],
+                    "recommended_actions": ["Refresh profile."],
+                    "follow_up": ["Monitor."],
+                    "raw_text": "Customer context summary.",
+                },
+            }
+        },
+        "crew3_results": {
+            "alert_intake": {
+                "agent": "AlertIntake",
+                "timestamp": "now",
+                "priority_tier": "P2",
+                "escalation_recommendation": "Yes",
+                "structured_output": {
+                    "summary": "Alert summary.",
+                    "severity": "high",
+                    "confidence": "high",
+                    "key_factors": ["critical_upstream_signal"],
+                    "recommended_actions": ["Escalate."],
+                    "follow_up": ["Document."],
+                    "raw_text": "Alert summary.",
+                },
+            },
+            "escalation_evaluation": {
+                "agent": "EscalationCaseSummary",
+                "timestamp": "now",
+                "action_recommendation": "Report",
+                "priority_tier": "P1",
+                "evidence_portfolio": ["Risk score: 88", "AML review"],
+                "structured_output": {
+                    "summary": "Escalation review summary.",
+                    "severity": "critical",
+                    "confidence": "high",
+                    "key_factors": ["AML review"],
+                    "recommended_actions": ["Report the case."],
+                    "follow_up": ["Escalate immediately."],
+                    "raw_text": "Escalation review summary.",
+                },
+            },
+            "escalation_case_summary": {
+                "agent": "EscalationCaseSummary",
+                "timestamp": "now",
+                "structured_output": {
+                    "summary": "Case summary ready for handoff.",
+                    "severity": "critical",
+                    "confidence": "high",
+                    "key_factors": ["AML review"],
+                    "recommended_actions": ["Report the case."],
+                    "follow_up": ["Escalate immediately."],
+                    "raw_text": "Case summary ready for handoff.",
+                },
+            },
+        },
+    }
+
+    result = nodes.compile_full_response(state)
+    response = result["response"]
+
+    assert response["response_contract_version"] == CONTRACT_VERSION
+    assert response["crew1_results"]["risk_assessment"]["structured_output"]["summary"] == (
+        "Risk assessment summary."
+    )
+    assert response["crew2_results"]["customer_context"]["consistency_label"] == "review"
+    assert response["crew3_results"]["alert_intake"]["priority_tier"] == "P2"
+    assert response["final_action_recommendation"] == "Report"
+    assert response["final_priority_tier"] == "P1"
+    assert response["final_escalation_recommendation"] == "Yes"
+    assert response["evidence_summary"] == ["Risk score: 88", "AML review"]
+    assert response["evidence_portfolio"] == ["Risk score: 88", "AML review"]
+
+
+def test_trace_events_include_auditability_fields(monkeypatch):
+    monkeypatch.setattr(nodes.risk, "score_transaction", lambda txn: {"score": 12})
+    monkeypatch.setattr(
+        nodes.risk,
+        "assess_portfolio_risk",
+        lambda portfolio, market_conditions, customer_context=None: {
+            "agent": "RiskAssessment",
+            "timestamp": "now",
+            "structured_output": {
+                "summary": "Risk assessment summary.",
+                "severity": "high",
+                "confidence": "medium",
+                "key_factors": ["Liquidity concentration"],
+                "recommended_actions": ["Review concentration."],
+                "follow_up": ["Monitor."],
+                "raw_text": "Risk assessment summary.",
+            },
+            "risk_analysis": "Risk analysis ok.",
+        },
+    )
+    monkeypatch.setattr(
+        nodes.risk,
+        "detect_fraud_risk",
+        lambda transactions, portfolio, ml_scores: {
+            "agent": "RiskDetector",
+            "timestamp": "now",
+            "structured_output": {
+                "summary": "Fraud review summary.",
+                "severity": "medium",
+                "confidence": "medium",
+                "key_factors": ["Velocity spike"],
+                "recommended_actions": ["Review activity."],
+                "follow_up": ["Monitor."],
+                "raw_text": "Fraud review summary.",
+            },
+            "assessment": "Fraud review ok.",
+        },
+    )
+    monkeypatch.setattr(
+        nodes.compliance,
+        "invoke",
+        lambda portfolio, transactions, mode="quick", customer_context=None: {
+            "agent": "Compliance",
+            "timestamp": "now",
+            "prechecks": {
+                "rule_hits": [
+                    {
+                        "rule_id": "AML_ALERT",
+                        "severity": "high",
+                        "basis": "internal_schema_control",
+                        "description": "AML review",
+                    }
+                ]
+            },
+            "structured_output": {
+                "summary": "Compliance summary.",
+                "severity": "high",
+                "confidence": "high",
+                "key_factors": ["AML review"],
+                "recommended_actions": ["Escalate."],
+                "follow_up": ["Document."],
+                "raw_text": "Compliance summary.",
+            },
+            "summary": "Compliance summary.",
+        },
+    )
+    monkeypatch.setattr(nodes, "_emit_llm_thinking", lambda *args, **kwargs: None)
+
+    result = nodes.run_full_crew_one(
+        {
+            "portfolio": {"id": 1, "name": "Demo"},
+            "transactions": [{"symbol": "MSFT", "type": "buy"}],
+            "customer_context_seed": {
+                "customer_id": "customer-1",
+                "profile_data": {"segment": "premium"},
+            },
+            "analysis_trace": [],
+        }
+    )
+
+    risk_event = next(
+        event
+        for event in result["analysis_trace"]
+        if event.get("type") == "agent" and event.get("name") == "Risk Assessment Agent"
+    )
+
+    assert risk_event["contract_version"] == CONTRACT_VERSION
+    assert risk_event["agent"] == "Risk Assessment Agent"
+    assert risk_event["structured_summary"] == "Risk assessment summary."
+    assert risk_event["severity"] == "high"
+    assert risk_event["confidence"] == "medium"
+    assert risk_event["evidence_refs"] == ["crew1_results.risk_assessment"]
+    assert risk_event["fallback_used"] is False
+    assert risk_event["rate_limited"] is False
